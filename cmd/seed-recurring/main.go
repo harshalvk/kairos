@@ -16,6 +16,8 @@ func main() {
 	ctx := context.Background()
 	pgDSN := os.Getenv("POSTGRES_DSN")
 	if pgDSN == "" {
+		// #nosec G101 -- local development default only, not a real
+		// credential. alays set POSTGRES_DSN in any non-local env
 		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
 	}
 	db, err := pgxpool.New(ctx, pgDSN)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/harshalvk/kairos/internal/circuitbreaker"
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/metrics"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
@@ -60,6 +62,8 @@ func main() {
 
 	pgDSN := os.Getenv("POSTGRES_DSN")
 	if pgDSN == "" {
+		// #nosec G101 -- local developement default only, not a real
+		// credential. always set POSTGRES_DSN in any non-local env
 		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
 	}
 	db, err := pgxpool.New(ctx, pgDSN)
@@ -118,7 +122,10 @@ func main() {
 		}
 	}()
 
-	fmt.Println("worker pool started, waiting for jobs...")
+	logger := logging.New(nodeID)
+	ctx = logging.WithContext(ctx, logger)
+
+	logger.Info("worker pool started", slog.Int("concurrency", 5))
 	pool.Start(ctx, 30*time.Second)
-	fmt.Println("worker pool stopped")
+	logger.Info("worker pool stopped")
 }

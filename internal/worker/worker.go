@@ -4,12 +4,13 @@ package worker
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/harshalvk/kairos/internal/circuitbreaker"
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/metrics"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
@@ -56,6 +57,7 @@ func (wp *Pool) RegisterHandler(jobType string, h Handler) {
 // they do not pick up new jobs. Start blocks until every worker has exited
 // or shutdownTimeout elapses, whichever comes first.
 func (wp *Pool) Start(ctx context.Context, shutdownTimeout time.Duration) {
+	logger := logging.FromContext(ctx)
 	var wg sync.WaitGroup
 	for i := 0; i < wp.concurrency; i++ {
 		wg.Add(1)
@@ -73,22 +75,24 @@ func (wp *Pool) Start(ctx context.Context, shutdownTimeout time.Duration) {
 	// wait for the shutdown signal first - workers run indefinitely
 	// until thne
 	<-ctx.Done()
-	log.Printf("shutdown signal received, waiting for in-flight jobs to finish...")
+	logger.Info("shutdown signal received, waiting for in-flight jobs to finish")
 
 	select {
 	case <-done:
-		log.Println("all workers exited cleanly")
+		logger.Info("all workers exited cleanly")
 	case <-time.After(shutdownTimeout):
-		log.Printf("shutdown timeout (%s) exceeded, some workers may still be mid-job", shutdownTimeout)
+		logger.Warn("shutdown timeout exceeded, some workers may still be mid-job", slog.Duration("timeout", shutdownTimeout))
 	}
 }
 
 func (wp *Pool) runWorker(ctx context.Context, id int, wg *sync.WaitGroup) {
 	defer wg.Done()
+	logger := logging.FromContext(ctx).With(slog.Int("worker_id", id))
+
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("worker %d: shutdown signal received, no longer picking up new jobs", id)
+			logger.Info("shutdown signal received, no longer picking up new jobs")
 			return
 		default:
 		}
@@ -103,9 +107,17 @@ func (wp *Pool) runWorker(ctx context.Context, id int, wg *sync.WaitGroup) {
 }
 
 func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
+	logger := logging.FromContext(ctx).With(
+		slog.Int("workder_id", workerID),
+		slog.String("job_id", j.ID),
+		slog.String("job_type", j.Type),
+		slog.Int("attempt", j.Attempts+1),
+		slog.Int("max_attempts", j.MaxAttempts),
+	)
+
 	handler, ok := wp.handlers[j.Type]
 	if !ok {
-		log.Printf("[%s] worker %d: no handler for job type %q, skipping", wp.nodeID, workerID, j.Type)
+		logger.Warn("no handler for job type, skipping")
 		return
 	}
 
@@ -113,7 +125,7 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 		// circuit is open - this dependency is known to be failing
 		// schedule a retry (same backoff mechanism as a normal failure)
 		// rather than attempting a call we already expect to fail
-		log.Printf("[%s] worker %d: circuit open for job type %q, deferring job %s", wp.nodeID, workerID, j.Type, j.ID)
+		logger.Info("circuit open for job type, deferring job")
 		wp.scheduleRetry(ctx, j)
 		return
 	}
@@ -121,18 +133,19 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	if err := wp.limiter.Wait(ctx, j.Type); err != nil {
 		// ctx was cancled while watiting for a rate limit token - likely
 		// shutdown in progress. re-queue the job rather than dropping it
-		log.Printf("[%s] worker [%d]: rate limit wait canclled for job %s: %v", wp.nodeID, workerID, j.ID, err)
+		logger.Warn("rate limit wait canclled, re-enqueuing", slog.Any("error", err))
 		if reErr := wp.queue.Enqueue(ctx, j); reErr != nil {
-			log.Printf("job %s: failed to re-enqueue after canclled rate-limit wait: %v", j.ID, reErr)
+			logger.Error("failed to re-enqueue after canclled rate-limit wait", slog.Any("error", reErr))
 		}
 		return
 	}
 
-	log.Printf("[%s] worker %d: processing job %s (%s), attempt %d/%d", wp.nodeID, workerID, j.ID, j.Type, j.Attempts+1, j.MaxAttempts)
+	logger.Info("processing job")
 
 	start := time.Now()
 	handleErr := handler(ctx, j)
-	metrics.JobDuration.WithLabelValues(j.Type).Observe(time.Since(start).Seconds())
+	duration := time.Since(start)
+	metrics.JobDuration.WithLabelValues(j.Type).Observe(duration.Seconds())
 
 	if handleErr == nil {
 		wp.breaker.RecordSuccess(j.Type)
@@ -140,13 +153,13 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 		j.Status = job.StatusCompleted
 		metrics.JobsProcessed.WithLabelValues(j.Type, "completed").Inc()
 		if err := wp.store.RecordStatus(ctx, j); err != nil {
-			log.Printf("job %s: failed to recrod completed status: %v", j.ID, err)
+			logger.Error("failed to recrod completed status", slog.Any("error", err))
 		}
 		if err := wp.queue.ResolveDependents(ctx, j.ID); err != nil {
-			log.Printf("job %s: failed to resolve dependents: %v", j.ID, err)
+			logger.Error("failed to resolve dependents", slog.Any("error", err))
 		}
 
-		log.Printf("[%s] worker %d: job %s completed", wp.nodeID, workerID, j.ID)
+		logger.Info("job completed", slog.Duration("duration", duration))
 		return
 	}
 
@@ -157,9 +170,9 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	j.Status = job.StatusFailed
 	metrics.JobsProcessed.WithLabelValues(j.Type, "failed").Inc()
 	if recError := wp.store.RecordCreated(ctx, j); recError != nil {
-		log.Printf("job %s: failed to record failed status: %v", j.ID, recError)
+		logger.Error("failed to record failed status", slog.Duration("duration", duration))
 	}
-	log.Printf("worker %d: job %s failed: %v", workerID, j.ID, handleErr)
+	logger.Warn("job failed", slog.Any("error", handleErr), slog.Duration("duration", duration))
 
 	if j.Attempts >= j.MaxAttempts {
 		wp.moveToDeadLetter(ctx, j)
@@ -170,14 +183,15 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 }
 
 func (wp *Pool) scheduleRetry(ctx context.Context, j *job.Job) {
+	logger := logging.FromContext(ctx).With(slog.String("job_id", j.ID))
 	delay := backoffDuration(j.Attempts)
 	runAt := time.Now().Add(delay)
 	j.Status = job.StatusPending
 
-	log.Printf("job %s: scheduling retry at %s (in %s)", j.ID, runAt.Format(time.RFC3339), delay)
+	logger.Info("scheduling retry", slog.Time("run_at", runAt), slog.Duration("delay", delay))
 
 	if err := wp.queue.EnqueueDelayed(ctx, j, runAt); err != nil {
-		log.Printf("job %s: failed to schedule retry: %v", j.ID, err)
+		logger.Error("failed to schedule retry", slog.Any("error", err))
 	}
 }
 
@@ -193,19 +207,20 @@ func backoffDuration(attempt int) time.Duration {
 }
 
 func (wp *Pool) moveToDeadLetter(ctx context.Context, j *job.Job) {
+	logger := logging.FromContext(ctx).With(slog.String("job_id", j.ID))
 	j.Status = job.StatusDeadLetter
 
 	if err := wp.queue.MoveToDeadLetter(ctx, j); err != nil {
-		log.Printf("job %s: failed to move to dead letter: %v", j.ID, err)
+		logger.Error("failed to move to dead letter", slog.Any("error", err))
 		return
 	}
 	metrics.JobsProcessed.WithLabelValues(j.Type, "dead_letter").Inc()
 	if err := wp.store.RecordStatus(ctx, j); err != nil {
-		log.Printf("job %s: failed to record dead-letter status: %v", j.ID, err)
+		logger.Error("failed to record dead-letter status", slog.Any("error", err))
 	}
 	if err := wp.queue.CascadeFailDependents(ctx, j.ID); err != nil {
-		log.Printf("job %s: failed to cascade-fail dependents: %v", j.ID, err)
+		logger.Error("failed to cascade-fail dependents", slog.Any("error", err))
 	}
 
-	log.Printf("job %s: moved to dead-letter queue after %d attempts", j.ID, j.Attempts)
+	logger.Warn("job moved to dead-letter", slog.Int("attempts", j.Attempts))
 }

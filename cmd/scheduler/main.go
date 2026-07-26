@@ -4,10 +4,11 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
+	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/redis/go-redis/v9"
 )
@@ -20,19 +21,21 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	q := queue.New(rdb)
 	ctx := context.Background()
+	logger := logging.New("scheduler")
+	ctx = logging.WithContext(ctx, logger)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	log.Println("scheduler started, checking for due jobs every 1s")
+	logger.Info("scheduler started, checking for due jobs every 1s")
 	for range ticker.C {
 		n, err := q.PromoteDueJobs(ctx)
 		if err != nil {
-			log.Printf("promote due jobs: %v", err)
+			logger.Error("promote due jobs", slog.Any("error", err))
 			continue
 		}
 		if n > 0 {
-			log.Printf("promoted %d due job(s) to pending queue", n)
+			logger.Info("promoted due job(s) to pending queue", slog.Int("promoted_due_job(s)", n))
 		}
 	}
 }

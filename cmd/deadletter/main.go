@@ -4,10 +4,10 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
+	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/redis/go-redis/v9"
 )
@@ -24,28 +24,43 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
 	q := queue.New(rdb)
 	ctx := context.Background()
+	logger := logging.New("deadletter")
+	ctx = logging.WithContext(ctx, logger)
 
 	switch *action {
 	case "list":
 		jobs, err := q.ListDeadLetter(ctx, 50)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed list list deadletter jobs", slog.Any("error", err))
+			os.Exit(1)
 		}
-		for _, job := range jobs {
-			fmt.Printf(("id=%s type=%s attempts=%d error=%q\n"), job.ID, job.Type, job.Attempts, job.LastError)
+		for _, j := range jobs {
+			logger.Info("dead-lettered job",
+				slog.String("job_id", j.ID),
+				slog.String("job_type", j.Type),
+				slog.Int("attempts", j.Attempts),
+				slog.String("last_error", j.LastError),
+			)
 		}
 	case "requeue":
 		if *jobID == "" {
-			log.Fatal("--id required for requeue")
+			logger.Info("--id required for requeue")
+			os.Exit(1)
 		}
 		if err := q.RequeueDeadLetter(ctx, *jobID); err != nil {
-			log.Fatal(err)
+			logger.Error("failed to requeue to deadletter", slog.Any("error", err))
+			os.Exit(1)
 		}
-		fmt.Println("requeued: ", *jobID)
+
+		logger.Info("requeued: ", slog.String("job_id", *jobID))
 	case "purge":
 		if err := q.PurgeDeadLetter(ctx); err != nil {
-			log.Fatal(err)
+			logger.Error("failed to purge dead letter", slog.Any("error", err))
+			os.Exit(1)
 		}
-		fmt.Println("dead letter queue purged")
+		logger.Info("dead letter queue purged")
+	default:
+		logger.Error("unknown action", slog.String("action", *action))
+		os.Exit(1)
 	}
 }

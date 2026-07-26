@@ -4,7 +4,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +12,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/scheduler"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +23,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	logger := logging.New("cron")
+	ctx = logging.WithContext(ctx, logger)
+
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379"
@@ -31,20 +35,23 @@ func main() {
 
 	pgDSN := os.Getenv("POSTGRES_DSN")
 	if pgDSN == "" {
+		// #nosec G101
 		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
 	}
 	db, err := pgxpool.New(ctx, pgDSN)
 	if err != nil {
-		panic(err)
+		logger.Error("failed to connect to postgrs", slog.Any("error", err))
+		os.Exit(1)
 	}
 	defer db.Close()
 	store := scheduler.NewStore(db)
 
 	recurringJobs, err := store.ListEnabled(ctx)
 	if err != nil {
-		panic(err)
+		logger.Error("failed to list recurring jobs", slog.Any("error", err))
+		os.Exit(1)
 	}
-	log.Printf("loaded %d enabled recurring job(s)", len(recurringJobs))
+	logger.Info("loaded enabled recurring jobs", slog.Int("count", len(recurringJobs)))
 
 	c := cron.New(cron.WithSeconds())
 
@@ -53,26 +60,26 @@ func main() {
 		_, err := c.AddFunc(rj.CronExpr, func() {
 			j := job.New(rj.JobType, rj.Payload, rj.MaxAttempts)
 			if err := q.Enqueue(ctx, j); err != nil {
-				log.Printf("recurring job %q: failed to enqueue: %v", rj.Name, err)
+				logger.Error("recurring job failed to enqueue", slog.String("job_name", rj.Name), slog.Any("error", err))
 				return
 			}
 			if err := store.RecordRun(ctx, rj.ID, j.CreatedAt); err != nil {
-				log.Printf("recurring job %q: failed to record run: %v", rj.Name, err)
+				logger.Error("recurring job failed to record run", slog.String("job_name", rj.Name), slog.Any("error", err))
 			}
-			log.Printf("recurring job %q fired: enqueued job %s", rj.Name, j.ID)
+			logger.Info("recurring job fired", slog.String("job_name", rj.Name), slog.String("job_id", j.ID))
 		})
 		if err != nil {
-			log.Printf("recurring job %q: invalid cron expression %q: %v", rj.Name, rj.CronExpr, err)
+			logger.Warn("invalid cron expression", slog.String("job_name", rj.Name), slog.String("cron_expr", rj.CronExpr), slog.Any("error", err))
 			continue
 		}
 	}
 
 	c.Start()
-	log.Printf("cron scheduler started")
+	logger.Info("cron scheduler started")
 
 	<-ctx.Done()
-	log.Printf("shutting down cron scheduler...")
+	logger.Info("shutting down cron scheduler...")
 	stopCtx := c.Stop() // stops accepting new triggers, waits for running jobs
 	<-stopCtx.Done()
-	log.Printf("cron scheduler stopped")
+	logger.Info("cron scheduler stopped")
 }

@@ -58,6 +58,7 @@ Significant design decisions are recorded in [`docs/adr/`](docs/adr/README.md) a
 If you use VS Code or GitHub Codespaces, you don't need to install Go, Redis, Postgres, or any of the tooling below manually — open this repo in a devcontainer (`Ctrl+Shift+P` → "Dev Containers: Reopen in Container" in VS Code, or "Create codespace" on GitHub) and everything is pre-configured: Go 1.22, golangci-lint, lefthook (pre-commit hooks installed automatically), govulncheck, gosec, and live Redis/Postgres instances.
 
 ## Manual setup
+
 (existing prerequisites/setup content stays below this, for anyone not using the devcontainer)
 
 ## Keeping local and CI tooling in sync
@@ -67,3 +68,9 @@ in `.github/workflows/ci.yml` in the same commit. Local and CI drifting
 apart on tool versions is the most common source of "works locally,
 fails in CI" — check `go version` and `golangci-lint --version` against
 what's pinned in ci.yml before troubleshooting anything else.
+
+## Logging conventions
+
+- `internal/*` packages return errors; they don't log directly (the exception is `internal/worker`, which owns retry/dead-letter decisions worth recording).
+- `cmd/*` entrypoints use structured `slog` (via `internal/logging`) for all operational logging — startup, shutdown, errors.
+- Plain `fmt.Println`/`fmt.Printf` is reserved for direct CLI result output a human runs the command to see (e.g. `cmd/producer`'s "enqueued: <id>"), not for logging events.
