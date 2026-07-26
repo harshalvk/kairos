@@ -35,29 +35,46 @@ This project builds each of those pieces manually, one at a time, with the reaso
 ```
 kairos/
 ├── go.mod
-├── job.go              # core Job struct and constructor (package kairos)
-├── queue.go            # Redis-backed queue: enqueue/dequeue/dead-letter ops
-├── worker.go           # worker pool, retry logic, backoff
+├── internal/
+│   ├── job/              # core Job domain model
+│   ├── queue/             # Redis-backed queue: pending, dead-letter, delayed, dependencies, idempotency
+│   ├── store/              # Postgres job history persistence
+│   ├── metrics/            # Prometheus metrics
+│   ├── worker/              # worker pool, retries, dead-lettering
+│   ├── ratelimit/           # per-job-type token bucket rate limiting
+│   ├── circuitbreaker/      # per-job-type circuit breaker
+│   └── scheduler/           # recurring (cron) job definitions
 ├── cmd/
-│   ├── producer/       # CLI to enqueue test jobs
-│   ├── worker/         # runs the worker pool, processes jobs
-│   └── deadletter/     # CLI to list/requeue/purge dead-lettered jobs
-│   └── scheduler/      # reshedules a dead-lettered job
-└── README.md
+│   ├── producer/            # enqueue a test job
+│   ├── worker/              # run the worker pool
+│   ├── scheduler/           # promote due delayed/retry jobs
+│   ├── cron/                # fire recurring jobs on schedule
+│   ├── deadletter/          # inspect/requeue/purge dead-lettered jobs
+│   └── seed-recurring/      # register example recurring job definitions
+├── examples/                # runnable examples of Kairos capabilities
+├── migrations/               # Postgres schema migrations
+├── docs/adr/                 # architecture decision records
+├── observability/            # Prometheus + Grafana provisioning
+├── docker-compose.yml
+├── Dockerfile
+└── .goreleaser.yml
 ```
 
 ## Supported features
 
-- **Core job model** — UUID-based `Job` struct (`Type`, raw JSON `Payload`, `Status`, `Attempts`/`MaxAttempts`, timestamps, `LastError`) that every other component builds against.
-- **Redis-backed queue** — `Enqueue`/`Dequeue` via `LPUSH`/`BRPOP`. Blocking pop means no polling loop burning CPU.
-- **Worker pool** — fixed number of goroutines pulling and routing jobs to registered `Handler`s by `job.Type`, capping parallelism to protect downstream resources.
-- **Retries with exponential backoff** — failed jobs are requeued with `2^attempts` backoff (capped at 30s) or dead-lettered once `MaxAttempts` is hit.
-- **Dead-letter queue** — permanently-failed jobs land in a separate Redis list, inspectable/requeueable/purgeable via `cmd/deadletter`.
-- **Durable delayed jobs** — retries and scheduled jobs live in a Redis sorted set (score = run-at timestamp), promoted by a standalone `cmd/scheduler` process. Survives worker restarts, unlike an in-memory timer.
-- **Postgres persistence** — every job's lifecycle is written to a `job_history` table for durable, queryable audit history alongside Redis's live queue state.
-- **Metrics** — Prometheus counters/histogram/gauge on `/metrics`: jobs processed (by type + outcome), handler duration, pending queue depth.
-- **Graceful shutdown** — workers stop picking up new jobs on SIGTERM/SIGINT but let an in-flight job finish, bounded by a shutdown timeout.
-- **Multi-node ready** — `BRPOP` already distributes work safely across multiple worker processes with no extra code; workers are tagged with a `nodeID` for log attribution across machines. Leader election and queue sharding are known, intentionally unbuilt next steps.
+- **Priority queues** — high/default/low, dequeued in order via a single atomic multi-key `BRPOP`
+- **Job dependencies (DAGs)** — jobs run only after declared dependencies complete; failures cascade to dependents
+- **Idempotency keys** — duplicate enqueue attempts (same type + key) are skipped via atomic `SETNX`
+- **Retries with backoff** — exponential backoff, capped, dead-lettered after `MaxAttempts`
+- **Dead-letter queue** — inspect, requeue, or purge permanently-failed jobs
+- **Durable delayed jobs** — retries and scheduled jobs survive worker restarts via a Redis sorted set
+- **Recurring (cron) jobs** — Postgres-backed schedules, fired by a dedicated `cmd/cron` process
+- **Rate limiting** — per-job-type token bucket, independent of worker concurrency
+- **Circuit breaker** — per-job-type closed/open/half-open, stops hammering a failing dependency
+- **Postgres persistence** — full job lifecycle history, queryable independently of live queue state
+- **Metrics** — Prometheus counters/histogram/gauges; Grafana dashboard included
+- **Graceful shutdown** — bounded drain of in-flight jobs on SIGTERM/SIGINT
+- **Multi-node ready** — safe concurrent workers via `BRPOP`, no extra coordination needed
 
 ## Running it locally
 

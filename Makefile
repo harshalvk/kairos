@@ -1,3 +1,6 @@
+SHELL := "C:\Windows\system32\bash.exe"
+.SHELLFLAGS := -ec
+
 .PHONY: help build test lint fmt vet migrate vuln sec run-worker run-producer run-scheduler run-deadletter docker-up docker-down docker-logs clean docker-build-worker docker-build-scheduler docker-build-producer docker-build-deadletter
 
 build:
@@ -40,15 +43,6 @@ run-cron:
 seed-recurring:
 	go run ./cmd/seed-recurring
 
-docker-up:
-	docker compose up -d
-
-docker-down:
-	docker compose down
-
-docker-logs:
-	docker compose logs -f
-
 clean:
 	rm -rf bin/
 
@@ -70,9 +64,6 @@ docker-build-producer:
 docker-build-deadletter:
 	docker build --build-arg CMD_PATH=cmd/deadletter -t kairos-deadletter .
 
-docker-up: ## Start redis, postgres, worker, prometheus, and grafana
-	docker compose up -d --build
-
 grafana: ## Open Grafana in the browser (admin/kairos, or anonymous viewer access)
 	@echo "Grafana: http://localhost:3000"
 	@echo "Prometheus: http://localhost:9090"
@@ -87,3 +78,6 @@ bench-compare: ## Compare current benchmarks against the saved baseline
 	go test -bench=. -benchmem ./... > bench_current.txt
 	go install golang.org/x/perf/cmd/benchstat@latest
 	benchstat bench_baseline.txt bench_current.txt
+
+run-examples: ## Run all examples in sequence (requires make docker-up first)
+	"C:/Program Files/Git/bin/bash.exe" -c 'for dir in examples/*/; do if [ -f "$$dir/main.go" ]; then echo "=== $$dir ==="; go run ./$$dir; echo ""; fi; done'
