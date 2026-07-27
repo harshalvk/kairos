@@ -15,6 +15,9 @@ import (
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
 	"github.com/harshalvk/kairos/internal/store"
+	"github.com/harshalvk/kairos/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // Handler processes a single job. Returning an error means the job failed.
@@ -107,6 +110,14 @@ func (wp *Pool) runWorker(ctx context.Context, id int, wg *sync.WaitGroup) {
 }
 
 func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
+	ctx, span := tracing.StartSpan(ctx, "job.process")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("job.id", j.ID),
+		attribute.String("job.type", j.Type),
+		attribute.Int("job.attempt", j.Attempts+1),
+	)
+
 	logger := logging.FromContext(ctx).With(
 		slog.Int("workder_id", workerID),
 		slog.String("job_id", j.ID),
@@ -117,6 +128,7 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 
 	handler, ok := wp.handlers[j.Type]
 	if !ok {
+		span.SetStatus(codes.Error, "no handler registered")
 		logger.Warn("no handler for job type, skipping")
 		return
 	}
@@ -125,6 +137,7 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 		// circuit is open - this dependency is known to be failing
 		// schedule a retry (same backoff mechanism as a normal failure)
 		// rather than attempting a call we already expect to fail
+		span.AddEvent("circuit_open_deferred")
 		logger.Info("circuit open for job type, deferring job")
 		wp.scheduleRetry(ctx, j)
 		return
@@ -133,6 +146,7 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	if err := wp.limiter.Wait(ctx, j.Type); err != nil {
 		// ctx was cancled while watiting for a rate limit token - likely
 		// shutdown in progress. re-queue the job rather than dropping it
+		span.RecordError(err)
 		logger.Warn("rate limit wait canclled, re-enqueuing", slog.Any("error", err))
 		if reErr := wp.queue.Enqueue(ctx, j); reErr != nil {
 			logger.Error("failed to re-enqueue after canclled rate-limit wait", slog.Any("error", reErr))
@@ -142,12 +156,15 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 
 	logger.Info("processing job")
 
+	handlerCtx, handlerSpan := tracing.StartSpan(ctx, "job.handler")
 	start := time.Now()
-	handleErr := handler(ctx, j)
+	handlerErr := handler(handlerCtx, j)
 	duration := time.Since(start)
+	handlerSpan.End()
+
 	metrics.JobDuration.WithLabelValues(j.Type).Observe(duration.Seconds())
 
-	if handleErr == nil {
+	if handlerErr == nil {
 		wp.breaker.RecordSuccess(j.Type)
 		metrics.CircuitState.WithLabelValues(j.Type).Set(float64(wp.breaker.StateOf(j.Type)))
 		j.Status = job.StatusCompleted
@@ -159,20 +176,24 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 			logger.Error("failed to resolve dependents", slog.Any("error", err))
 		}
 
+		span.SetStatus(codes.Ok, "completed")
 		logger.Info("job completed", slog.Duration("duration", duration))
 		return
 	}
 
+	span.RecordError(handlerErr)
+	span.SetStatus(codes.Error, handlerErr.Error())
+
 	wp.breaker.RecordFailure(j.Type)
 	metrics.CircuitState.WithLabelValues(j.Type).Set(float64(wp.breaker.StateOf(j.Type)))
 	j.Attempts++
-	j.LastError = handleErr.Error()
+	j.LastError = handlerErr.Error()
 	j.Status = job.StatusFailed
 	metrics.JobsProcessed.WithLabelValues(j.Type, "failed").Inc()
 	if recError := wp.store.RecordCreated(ctx, j); recError != nil {
 		logger.Error("failed to record failed status", slog.Duration("duration", duration))
 	}
-	logger.Warn("job failed", slog.Any("error", handleErr), slog.Duration("duration", duration))
+	logger.Warn("job failed", slog.Any("error", handlerErr), slog.Duration("duration", duration))
 
 	if j.Attempts >= j.MaxAttempts {
 		wp.moveToDeadLetter(ctx, j)

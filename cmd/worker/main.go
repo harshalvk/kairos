@@ -22,6 +22,7 @@ import (
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
 	"github.com/harshalvk/kairos/internal/store"
+	"github.com/harshalvk/kairos/internal/tracing"
 	"github.com/harshalvk/kairos/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -50,6 +51,33 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			hostname = "unknown"
+		}
+		nodeID = hostname
+	}
+
+	logger := logging.New(nodeID)
+	ctx = logging.WithContext(ctx, logger)
+
+	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if otelEndpoint == "" {
+		otelEndpoint = "localhost:4318"
+	}
+	shutdownTracing, err := tracing.Setup(ctx, otelEndpoint, "kairos-worker")
+	if err != nil {
+		logger.Warn("tracing setup failed, continuing without tracing", slog.Any("error", err))
+	} else {
+		defer func() {
+			if shutdownTracingErr := shutdownTracing(context.Background()); shutdownTracingErr != nil {
+				logger.Error("failed to shut down tracing", slog.Any("error", err))
+			}
+		}()
+	}
+
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379"
@@ -72,15 +100,6 @@ func main() {
 	}
 	defer db.Close()
 	store := store.NewStore(db)
-
-	nodeID := os.Getenv("NODE_ID")
-	if nodeID == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			hostname = "unknown"
-		}
-		nodeID = hostname
-	}
 
 	breaker := circuitbreaker.New(5, 30*time.Second)                  // open after 5 consecutive fails, 30s cooldown
 	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker) // 5 concurrent workers
@@ -121,9 +140,6 @@ func main() {
 			}
 		}
 	}()
-
-	logger := logging.New(nodeID)
-	ctx = logging.WithContext(ctx, logger)
 
 	logger.Info("worker pool started", slog.Int("concurrency", 5))
 	pool.Start(ctx, 30*time.Second)

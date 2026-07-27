@@ -22,8 +22,8 @@ vet:
 	go vet ./...
 
 migrate:
-	docker cp migrations/0001_init.sql kairos-postgres:/0001_init.sql
-	docker exec -it kairos-postgres psql -U kairos -d kairos -f /0001_init.sql
+	docker cp migrations/0002_recurring_jobs.sql kairos-db:/0002_recurring_jobs.sql
+	docker exec -it kairos-db psql -U kairos -d kairos -f /0002_recurring_jobs.sql
 
 run-worker:
 	go run ./cmd/worker
