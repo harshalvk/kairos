@@ -29,11 +29,13 @@ services:
       NODE_ID: docker-worker-1
       REDIS_ADDR: redis:6379
       POSTGRES_DSN: postgres://kairos:kairos@db:5432/kairos
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
     ports:
       - "2112:2112"
     depends_on:
       - redis
       - db
+      - jaeger
 
   prometheus:
     image: prom/prometheus:latest
@@ -60,6 +62,16 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: kairos-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # jaeger-ui
+      - "4318:4318" # otlp http receiver
+    restart: unless-stopped
 
 volumes:
   postgres-data:
