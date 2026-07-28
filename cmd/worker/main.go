@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/harshalvk/kairos/internal/api"
 	"github.com/harshalvk/kairos/internal/circuitbreaker"
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/logging"
@@ -25,7 +25,6 @@ import (
 	"github.com/harshalvk/kairos/internal/tracing"
 	"github.com/harshalvk/kairos/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -105,22 +104,21 @@ func main() {
 	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker) // 5 concurrent workers
 	pool.RegisterHandler("send_email", sendEmailHandler)
 
+	apiServer := api.New(queue, store, logger)
 	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
+		logger.Info("admin api listening", slog.String("addr", ":8080"))
 
 		srv := &http.Server{
-			Addr:              ":2112",
-			Handler:           mux,
+			Addr:              ":8080",
+			Handler:           apiServer.Routes(),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       10 * time.Second,
 			WriteTimeout:      10 * time.Second,
 			IdleTimeout:       60 * time.Second,
 		}
 
-		log.Println("metrics server listening on :2112/metrics")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("metrics server error: %v", err)
+			logger.Error("admin api server error", slog.Any("error", err))
 		}
 	}()
 

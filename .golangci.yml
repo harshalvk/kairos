@@ -27,6 +27,10 @@ linters:
   exclusions:
     paths:
       - vendor
+    rules:
+      - path: _test\.go
+        linters:
+          - bodyclose
 
 formatters:
   enable:
