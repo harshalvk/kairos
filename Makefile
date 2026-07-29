@@ -81,3 +81,9 @@ bench-compare: ## Compare current benchmarks against the saved baseline
 
 run-examples: ## Run all examples in sequence (requires make docker-up first)
 	"C:/Program Files/Git/bin/bash.exe" -c 'for dir in examples/*/; do if [ -f "$$dir/main.go" ]; then echo "=== $$dir ==="; go run ./$$dir; echo ""; fi; done'
+
+loadtest-enqueue:
+	k6 run loadtest/enqueue.js
+
+loadtest-deadletter:
+	k6 run loadtest/deadletter-read.js
