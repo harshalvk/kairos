@@ -25,6 +25,13 @@ type statusRecorder struct {
 	wroteHeader bool
 }
 
+type enqueueRequest struct {
+	Type        string          `json:"type"`
+	Payload     json.RawMessage `json:"payload"`
+	MaxAttempts int             `json:"max_attempts"`
+	Priority    job.Priority    `json:"priority,omitempty"`
+}
+
 func (r *statusRecorder) WriteHeader(status int) {
 	if r.wroteHeader {
 		return
@@ -67,10 +74,13 @@ func (s *Server) Routes() http.Handler {
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/queue/depth", s.handleQueueDepth)
 
-	r.Route("/jobs/dead-letter", func(r chi.Router) {
-		r.Get("/", s.handleListDeadLetter)
-		r.Delete("/", s.handlePurgeDeadLetter)
-		r.Post("/{id}/requeue", s.handleRequeueDeadLetter)
+	r.Route("/jobs", func(r chi.Router) {
+		r.Post("/", s.handleEnqueue)
+		r.Route("/dead-letter", func(r chi.Router) {
+			r.Get("/", s.handleListDeadLetter)
+			r.Delete("/", s.handlePurgeDeadLetter)
+			r.Post("/{id}/requeue", s.handleRequeueDeadLetter)
+		})
 	})
 
 	return r
@@ -158,4 +168,31 @@ func (s *Server) handlePurgeDeadLetter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "purged"})
+}
+
+func (s *Server) handleEnqueue(w http.ResponseWriter, r *http.Request) {
+	var req enqueueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid reqeust body")
+		return
+	}
+
+	if req.Type == "" {
+		s.writeError(w, http.StatusBadRequest, "type is required")
+		return
+	}
+	if req.MaxAttempts <= 0 {
+		req.MaxAttempts = 3
+	}
+	if req.Priority == "" {
+		req.Priority = job.PriorityDefault
+	}
+
+	j := job.NewWithPriority(req.Type, req.Payload, req.MaxAttempts, req.Priority)
+	if err := s.queue.Enqueue(r.Context(), j); err != nil {
+		s.logger.Error("failed to enqueue job", slog.Any("error", err))
+		s.writeError(w, http.StatusInternalServerError, "failed to enqueue job")
+		return
+	}
+	s.writeJSON(w, http.StatusCreated, map[string]string{"job_id": j.ID})
 }
