@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
@@ -234,4 +235,42 @@ func TestEnqueueIdempotent_DifferentTypesSameKeyBothEnqueue(t *testing.T) {
 	enqueued2, err := q.EnqueueIdempotent(ctx, resizeJob, time.Hour)
 	require.NoError(t, err)
 	assert.True(t, enqueued2) // different type, same key — not a duplicate
+}
+
+func FuzzJobMarshalUnmarshalRoundTrip(f *testing.F) {
+	f.Add("send_email", `{"to":"test@example.com"}`, 3)
+	f.Add("", `{}`, 0)
+	f.Add("resize_image", `null`, 1)
+	f.Add("a very long job type name that is unusually verbose", `{"key":"value with unicode: 日本語 emoji: 🎉"}`, 100)
+
+	f.Fuzz(func(t *testing.T, jobType string, payload string, maxAttempts int) {
+		if !utf8.ValidString(jobType) {
+			// JSON text must be valid UTF-8 by spec — encoding/json lossily
+			// replaces invalid byte sequences with U+FFFD on marshal, which
+			// is expected behavior of the JSON encoding itself, not a bug
+			// in Kairos's round-trip logic. job.Type is always populated
+			// from Go string literals in real usage (handler registration),
+			// never from raw untrusted bytes, so this case isn't realistic.
+			t.Skip()
+		}
+
+		original := job.New(jobType, json.RawMessage(payload), maxAttempts)
+
+		data, err := json.Marshal(original)
+		if err != nil {
+			t.Skip()
+		}
+
+		var roundTripped job.Job
+		if err := json.Unmarshal(data, &roundTripped); err != nil {
+			t.Fatalf("failed to unmarshal a job that was just marshaled: %v", err)
+		}
+
+		if roundTripped.ID != original.ID {
+			t.Errorf("ID mismatch after round-trip: got %q, want %q", roundTripped.ID, original.ID)
+		}
+		if roundTripped.Type != original.Type {
+			t.Errorf("Type mismatch after round-trip: got %q, want %q", roundTripped.Type, original.Type)
+		}
+	})
 }

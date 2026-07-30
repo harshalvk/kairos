@@ -87,3 +87,9 @@ loadtest-enqueue:
 
 loadtest-deadletter:
 	k6 run loadtest/deadletter-read.js
+
+fuzz-job:
+	go test -fuzz=FuzzNew_NeverPanicsOnPayload -fuzztime=30s ./internal/job/...
+
+fuzz-queue:
+	go test -fuzz=FuzzJobMarshalUnmarshalRoundTrip -fuzztime=30s ./internal/queue/...
