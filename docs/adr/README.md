@@ -21,6 +21,9 @@ in Context → Decision → Consequences format.
 | [0014](0014-structured-logging-via-slog.md)                         | Structured JSON logging via slog                               |
 | [0015](0015-opentelemetry-tracing-via-otlp-http.md)                 | OpenTelemetry tracing via OTLP HTTP                            |
 | [0016](0016-admin-http-api.md)                                      | Admin HTTP API wrapping existing queue operations              |
+| [0017](0017-load-testing-via-k6.md)                                 | Load testing via k6 against the admin API                      |
+| [0018](0018-fuzz-testing-job-serialization.md)                      | Fuzz testing for job payload handling and serialization        |
+| [0019](0019-leader-election-for-scheduler.md)                       | Redis-based leader election for the scheduler                  |
 
 New ADRs should follow [the template](0000-template.md) and be numbered
 sequentially.
