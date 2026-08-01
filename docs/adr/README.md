@@ -24,6 +24,10 @@ in Context → Decision → Consequences format.
 | [0017](0017-load-testing-via-k6.md)                                 | Load testing via k6 against the admin API                      |
 | [0018](0018-fuzz-testing-job-serialization.md)                      | Fuzz testing for job payload handling and serialization        |
 | [0019](0019-leader-election-for-scheduler.md)                       | Redis-based leader election for the scheduler                  |
+| [0020](0020-redis-streams-alternative-implementation.md)            | Redis Streams as an alternative queue implementation           |
+| [0021](0021-grpc-client-sdk.md)                                     | gRPC service and client SDK under pkg/                         |
+| [0022](0022-semantic-release-automation.md)                         | Automated versioning via semantic-release                      |
+| [0023](0023-package-boundary-enforcement.md)                        | Enforce package dependency boundaries via go-arch-lint         |
 
 New ADRs should follow [the template](0000-template.md) and be numbered
 sequentially.

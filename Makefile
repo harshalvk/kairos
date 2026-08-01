@@ -93,3 +93,6 @@ fuzz-job:
 
 fuzz-queue:
 	go test -fuzz=FuzzJobMarshalUnmarshalRoundTrip -fuzztime=30s ./internal/queue/...
+
+arch-lint:
+	go-arch-lint check

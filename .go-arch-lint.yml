@@ -1,0 +1,169 @@
+version: 3
+workdir: .
+
+exclude:
+  - "**/*_test.go"
+
+vendors:
+  allOtherVendors:
+    in: "**"
+
+components:
+  job:
+    in: internal/job
+  metrics:
+    in: internal/metrics
+  ratelimit:
+    in: internal/ratelimit
+  circuitbreaker:
+    in: internal/circuitbreaker
+  leaderelection:
+    in: internal/leaderelection
+  logging:
+    in: internal/logging
+  tracing:
+    in: internal/tracing
+  queue:
+    in: internal/queue
+  store:
+    in: internal/store
+  scheduler:
+    in: internal/scheduler
+  streamqueue:
+    in: internal/streamqueue
+  worker:
+    in: internal/worker
+  api:
+    in: internal/api
+  grpcserver:
+    in: internal/grpcserver
+  kairospb:
+    in: pkg/kairospb
+  kairosclient:
+    in: pkg/kairosclient
+  cmd:
+    in: cmd/**
+  examples:
+    in: examples/**
+    
+deps:
+  job:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+  metrics:
+    anyVendorDeps: true
+    mayDependOn: []
+  logging:
+    anyVendorDeps: true
+    mayDependOn:
+      - logging
+  tracing:
+    anyVendorDeps: true
+    mayDependOn: []
+  leaderelection:
+    anyVendorDeps: true
+    mayDependOn:
+      - leaderelection
+  ratelimit:
+    anyVendorDeps: true
+    mayDependOn:
+      - ratelimit
+  circuitbreaker:
+    anyVendorDeps: true
+    mayDependOn:
+      - circuitbreaker
+
+  queue:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - queue
+  store:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - store
+  streamqueue:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+  scheduler:
+    anyVendorDeps: true
+    mayDependOn: []
+
+  worker:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - queue
+      - store
+      - metrics
+      - ratelimit
+      - circuitbreaker
+      - logging
+      - tracing
+
+  api:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - queue
+      - store
+      - logging
+      - api
+  grpcserver:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - queue
+      - logging
+      - kairospb
+
+  kairospb:
+    anyVendorDeps: true
+    mayDependOn: []
+  kairosclient:
+    anyVendorDeps: true
+    mayDependOn:
+      - kairospb
+
+  cmd:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - metrics
+      - ratelimit
+      - circuitbreaker
+      - leaderelection
+      - logging
+      - tracing
+      - queue
+      - store
+      - scheduler
+      - streamqueue
+      - worker
+      - api
+      - grpcserver
+      - kairospb
+      - kairosclient
+
+  examples:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - metrics
+      - ratelimit
+      - circuitbreaker
+      - leaderelection
+      - logging
+      - tracing
+      - queue
+      - store
+      - scheduler
+      - streamqueue
+      - worker
+      - api
+      - grpcserver
+      - kairospb
+      - kairosclient
