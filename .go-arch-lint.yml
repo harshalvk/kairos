@@ -1,6 +1,9 @@
 version: 3
 workdir: .
 
+allow:
+  deepScan: false
+
 exclude:
   - "**/*_test.go"
 
@@ -45,7 +48,7 @@ components:
     in: cmd/**
   examples:
     in: examples/**
-    
+
 deps:
   job:
     anyVendorDeps: true

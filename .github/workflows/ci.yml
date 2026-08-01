@@ -116,7 +116,7 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
       - name: Run gosec
-        run: gosec ./...
+        run: gosec -exclude-generated ./...
 
   arch-lint:
     runs-on: ubuntu-latest

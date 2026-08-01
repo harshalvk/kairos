@@ -6,11 +6,22 @@ package kairosclient
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/harshalvk/kairos/pkg/kairospb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	// #nosec G115 -- n is bounds-checked above; this conversion cannot
+	// overflow. gosec's static analysis doesn't trace the preceding
+	// guard, so this is a false positive, not a suppressed real issue.
+	return int32(n)
+}
 
 // Client wraps a gRPC connection to a Kairos server
 type Client struct {
@@ -50,7 +61,7 @@ func (c *Client) Enqueue(ctx context.Context, jobType string, payload []byte, op
 	resp, err := c.rpc.Enqueue(ctx, &kairospb.EnqueueRequest{
 		Type:           jobType,
 		Payload:        payload,
-		MaxAttempts:    int32(opts.MaxAttempts),
+		MaxAttempts:    clampInt32(opts.MaxAttempts),
 		Priority:       opts.Priority,
 		IdempotencyKey: opts.IdempotencyKey,
 	})

@@ -102,8 +102,8 @@ func (s *Server) ListDeadLetter(ctx context.Context, req *kairospb.ListDeadLette
 			Type:        j.Type,
 			Payload:     j.Payload,
 			Status:      string(j.Status),
-			Attempts:    int32(j.Attempts),
-			MaxAttempts: int32(j.MaxAttempts),
+			Attempts:    job.ToInt32(j.Attempts),
+			MaxAttempts: job.ToInt32(j.MaxAttempts),
 			LastError:   j.LastError,
 			CreatedAt:   timestamppb.New(j.CreatedAt),
 		})
