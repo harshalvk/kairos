@@ -2,23 +2,69 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [master]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-node@v4
         with:
-          go-version: "1.26"
+          node-version: "20"
+
+      - name: Install semantic-release
+        run: |
+          npm install -g semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @semantic-release/github \
+            conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release (creates tag + GitHub release if warranted)
+        id: semrel
+        run: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  goreleaser:
+    needs: release
+    runs-on: ubuntu-latest
+    if: needs.release.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Check if a new tag was created
+        id: check_tag
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          LATEST_COMMIT_TAG=$(git tag --points-at HEAD)
+          if [ -n "$LATEST_COMMIT_TAG" ]; then
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.check_tag.outputs.tagged == 'true'
+        with:
+          go-version: "1.25"
           cache: true
 
       - uses: goreleaser/goreleaser-action@v6
+        if: steps.check_tag.outputs.tagged == 'true'
         with:
           distribution: goreleaser
           version: latest

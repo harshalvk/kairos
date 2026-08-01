@@ -74,3 +74,20 @@ what's pinned in ci.yml before troubleshooting anything else.
 - `internal/*` packages return errors; they don't log directly (the exception is `internal/worker`, which owns retry/dead-letter decisions worth recording).
 - `cmd/*` entrypoints use structured `slog` (via `internal/logging`) for all operational logging — startup, shutdown, errors.
 - Plain `fmt.Println`/`fmt.Printf` is reserved for direct CLI result output a human runs the command to see (e.g. `cmd/producer`'s "enqueued: <id>"), not for logging events.
+
+## Releasing
+
+Releases are fully automated — you never manually run `git tag`.
+
+On every push to `master`, semantic-release inspects commits since the
+last release and decides whether a new version is warranted:
+
+- `feat:` commits → minor version bump
+- `fix:`, `perf:`, `refactor:` commits → patch version bump
+- `docs:`, `test:`, `chore:`, `ci:`, `build:` commits → no release
+- A commit with a `BREAKING CHANGE:` footer → major version bump
+
+If a release is warranted, semantic-release creates the tag and GitHub
+Release with generated notes, then goreleaser builds and attaches
+cross-platform binaries. Write correct Conventional Commit messages —
+that's the only lever that controls what gets released and when.
