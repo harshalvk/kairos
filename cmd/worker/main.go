@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/harshalvk/kairos/internal/api"
 	"github.com/harshalvk/kairos/internal/circuitbreaker"
+	"github.com/harshalvk/kairos/internal/grpcserver"
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/metrics"
@@ -24,8 +26,10 @@ import (
 	"github.com/harshalvk/kairos/internal/store"
 	"github.com/harshalvk/kairos/internal/tracing"
 	"github.com/harshalvk/kairos/internal/worker"
+	"github.com/harshalvk/kairos/pkg/kairospb"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
 )
 
 func sendEmailHandler(_ context.Context, job *job.Job) error {
@@ -105,6 +109,7 @@ func main() {
 	pool.RegisterHandler("send_email", sendEmailHandler)
 
 	apiServer := api.New(queue, store, logger)
+
 	go func() {
 		logger.Info("admin api listening", slog.String("addr", ":8080"))
 
@@ -119,6 +124,22 @@ func main() {
 
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("admin api server error", slog.Any("error", err))
+		}
+	}()
+
+	grpcSrv := grpc.NewServer()
+	kairospb.RegisterKairosServiceServer(grpcSrv, grpcserver.New(queue, logger))
+
+	go func() {
+		var lc net.ListenConfig
+		lis, err := lc.Listen(ctx, "tcp", ":9091")
+		if err != nil {
+			logger.Error("failed to listen for grpc", slog.Any("error", err))
+			return
+		}
+		logger.Info("grpc server listening", slog.String("addr", ":9090"))
+		if err := grpcSrv.Serve(lis); err != nil {
+			logger.Error("grpc server error", slog.Any("error", err))
 		}
 	}()
 

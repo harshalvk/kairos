@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package kairos.v1;
+
+option go_package = "github.com/harshalvk/kairos/pkg/kairospb";
+
+import "google/protobuf/timestamp.proto";
+
+service KairosService {
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+  rpc GetQueueDepth(GetQueueDepthRequest) returns (GetQueueDepthResponse);
+  rpc ListDeadLetter(ListDeadLetterRequest) returns (ListDeadLetterResponse);
+  rpc RequeueDeadLetter(RequeueDeadLetterRequest) returns (RequeueDeadLetterResponse);
+}
+
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_HIGH = 1;
+  PRIORITY_DEFAULT = 2;
+  PRIORITY_LOW = 3;
+}
+
+message EnqueueRequest {
+  string type = 1;
+  bytes payload = 2;
+  int32 max_attempts = 3;
+  Priority priority = 4;
+  string idempotency_key = 5; // optional; empty means no idempotency check
+}
+
+message EnqueueResponse {
+  string job_id = 1;
+  bool enqueued = 2; // false if skipped due to a duplicate idempotency key
+}
+
+message GetQueueDepthRequest {}
+
+message GetQueueDepthResponse {
+  map<string, int64> depth_by_priority = 1;
+}
+
+message ListDeadLetterRequest {
+  int64 limit = 1;
+}
+
+message Job {
+  string id = 1;
+  string type = 2;
+  bytes payload = 3;
+  string status = 4;
+  int32 attempts = 5;
+  int32 max_attempts = 6;
+  string last_error = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message ListDeadLetterResponse {
+  repeated Job jobs = 1;
+}
+
+message RequeueDeadLetterRequest {
+  string job_id = 1;
+}
+
+message RequeueDeadLetterResponse {
+  bool requeued = 1;
+}
