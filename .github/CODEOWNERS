@@ -1,0 +1,11 @@
+# Default owner for everything not covered below.
+*                                   @harshalvk
+
+# Architectural decisions and public API surfaces get explicit
+# ownership call-outs, even though the default rule already covers
+# them — this documents intent, not just access control.
+/docs/adr/                         @harshalvk
+/pkg/                               @harshalvk
+/.golangci.yml                      @harshalvk
+/.go-arch-lint.yml                  @harshalvk
+/.releaserc.json                    @harshalvk

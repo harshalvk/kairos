@@ -91,3 +91,15 @@ If a release is warranted, semantic-release creates the tag and GitHub
 Release with generated notes, then goreleaser builds and attaches
 cross-platform binaries. Write correct Conventional Commit messages —
 that's the only lever that controls what gets released and when.
+
+## Opening issues and PRs
+
+Bug reports and feature requests use the structured forms in the issue
+template picker — please don't skip required fields, they exist
+because past debugging in this project has consistently needed that
+exact information (see the CI troubleshooting history for a real
+example of why "what did you actually run" matters).
+
+PRs follow the template in `.github/PULL_REQUEST_TEMPLATE.md` — What /
+Why / Changes / How to verify / Known limitations, the same structure
+every commit and ADR in this project already follows.
