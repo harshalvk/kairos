@@ -180,32 +180,27 @@ func (q *Queue) EnqueueDelayed(ctx context.Context, j *job.Job, runAt time.Time)
 // set. Returns how many jobs were promoted.
 func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 	now := float64(time.Now().Unix())
-
-	// fetches all delayed jobs with the socre <= now (i.e due to run)
 	due, err := q.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
 		Key:     delayedKey(ctx),
+		ByScore: true,
 		Start:   "-inf",
 		Stop:    fmt.Sprintf("%f", now),
-		ByScore: true,
 	}).Result()
-
 	if err != nil {
 		return 0, fmt.Errorf("zrangebyscore: %w", err)
 	}
-
 	for _, data := range due {
 		var j job.Job
 		if err := json.Unmarshal([]byte(data), &j); err != nil {
-			return 0, fmt.Errorf("unmarshal due job: %w", err)
+			return 0, fmt.Errorf("unmarshal promoted job: %w", err)
 		}
-		if err := q.rdb.LPush(ctx, keyFor(j.Priority), data).Err(); err != nil {
+		if err := q.rdb.LPush(ctx, pendingKey(ctx, j.Priority), data).Err(); err != nil {
 			return 0, fmt.Errorf("push promoted job: %w", err)
 		}
 		if err := q.rdb.ZRem(ctx, delayedKey(ctx), data).Err(); err != nil {
 			return 0, fmt.Errorf("remove promoted job: %w", err)
 		}
 	}
-
 	return len(due), nil
 }
 

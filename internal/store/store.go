@@ -25,7 +25,7 @@ func NewStore(db *pgxpool.Pool) *Store {
 // RecordCreated inserts a new row when a job is first created.
 func (s *Store) RecordCreated(ctx context.Context, j *job.Job) error {
 	_, err := s.db.Exec(ctx, `
-		 INSERT INTO job_history (id, tenant_id type, payload, status, attempts, max_attempts, created_at)
+		 INSERT INTO job_history (id, tenant_id, type, payload, status, attempts, max_attempts, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (id) DO NOTHING
 	`, j.ID, tenant.FromContext(ctx), j.Type, j.Payload, j.Status, j.Attempts, j.MaxAttempts, j.CreatedAt)

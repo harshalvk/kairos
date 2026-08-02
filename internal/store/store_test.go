@@ -37,6 +37,7 @@ func setupPostgres(t *testing.T) *pgxpool.Pool {
 	_, err = pool.Exec(ctx, `
 CREATE TABLE job_history (
 id UUID PRIMARY KEY,
+tenant_id       TEXT NOT NULL DEFAULT 'default',
 type TEXT NOT NULL,
 payload JSONB NOT NULL,
 status TEXT NOT NULL,
