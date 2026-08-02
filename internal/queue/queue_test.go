@@ -9,6 +9,7 @@ import (
 
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -273,4 +274,27 @@ func FuzzJobMarshalUnmarshalRoundTrip(f *testing.F) {
 			t.Errorf("Type mismatch after round-trip: got %q, want %q", roundTripped.Type, original.Type)
 		}
 	})
+}
+
+func TestTenantIsolation_JobsDoNotCrossTenants(t *testing.T) {
+	rdb := setupRedis(t)
+	q := queue.New(rdb)
+
+	ctxA := tenant.WithContext(context.Background(), "tenant-a")
+	ctxB := tenant.WithContext(context.Background(), "tenant-b")
+
+	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
+	require.NoError(t, err)
+	j := job.New("send_email", payload, 3)
+
+	require.NoError(t, q.Enqueue(ctxA, j))
+
+	// tenant-b's queue must be empty even though tenant-a just enqueued.
+	_, err = q.Dequeue(ctxB, 1*time.Second)
+	assert.ErrorIs(t, err, redis.Nil)
+
+	// tenant-a can still dequeue its own job.
+	got, err := q.Dequeue(ctxA, 2*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, j.ID, got.ID)
 }

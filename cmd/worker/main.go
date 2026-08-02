@@ -24,6 +24,7 @@ import (
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
 	"github.com/harshalvk/kairos/internal/store"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/harshalvk/kairos/internal/tracing"
 	"github.com/harshalvk/kairos/internal/worker"
 	"github.com/harshalvk/kairos/pkg/kairospb"
@@ -104,8 +105,18 @@ func main() {
 	defer db.Close()
 	store := store.NewStore(db)
 
-	breaker := circuitbreaker.New(5, 30*time.Second)                  // open after 5 consecutive fails, 30s cooldown
-	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker) // 5 concurrent workers
+	breaker := circuitbreaker.New(5, 30*time.Second) // open after 5 consecutive fails, 30s cooldown
+
+	tenantID := os.Getenv("TENANT_ID")
+	if tenantID == "" {
+		tenantID = tenant.DefaultTenant
+	}
+	if err := tenant.Validate(tenantID); err != nil {
+		logger.Error("invalid TENANT_ID", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker, tenantID) // 5 concurrent workers
 	pool.RegisterHandler("send_email", sendEmailHandler)
 
 	apiServer := api.New(queue, store, logger)

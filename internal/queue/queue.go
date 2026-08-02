@@ -10,13 +10,8 @@ import (
 	"time"
 
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/redis/go-redis/v9"
-)
-
-const (
-	queueKey      = "kairos:pending"
-	deadLetterKey = "kairos:dead_letter"
-	delayedKey    = "kairos:delayed"
 )
 
 const (
@@ -32,10 +27,6 @@ var pendingKeys = map[job.Priority]string{
 	job.PriorityDefault: "kairos:pending:default",
 	job.PriorityLow:     "kairos:pending:low",
 }
-
-// dequeueOrder defines the prioiryt check order - high checked firs,
-// then low last
-var dequeueOrder = []job.Priority{job.PriorityHigh, job.PriorityDefault, job.PriorityLow}
 
 func waitingCountKey(jobID string) string { return waitingCountKeyPrefix + jobID }
 func dependentsKey(jobID string) string   { return dependentsKeyPrefix + jobID }
@@ -65,17 +56,17 @@ func (q *Queue) Enqueue(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	return q.rdb.LPush(ctx, keyFor(j.Priority), data).Err()
+	return q.rdb.LPush(ctx, pendingKey(ctx, j.Priority), data).Err()
 }
 
 // Dequeue blocks until a job is available, then returns it.
 // A timeout of 0 means block forever.
 func (q *Queue) Dequeue(ctx context.Context, timeout time.Duration) (*job.Job, error) {
-	keys := make([]string, len(dequeueOrder))
-	for i, p := range dequeueOrder {
-		keys[i] = pendingKeys[p]
+	keys := []string{
+		pendingKey(ctx, job.PriorityHigh),
+		pendingKey(ctx, job.PriorityDefault),
+		pendingKey(ctx, job.PriorityLow),
 	}
-
 	result, err := q.rdb.BRPop(ctx, timeout, keys...).Result()
 
 	if err != nil {
@@ -98,7 +89,7 @@ func (q *Queue) MoveToDeadLetter(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	return q.rdb.LPush(ctx, deadLetterKey, data).Err()
+	return q.rdb.LPush(ctx, deadLetterKey(ctx), data).Err()
 }
 
 // ListDeadLetter returns up to limit dead-lettered jobs without removing
@@ -109,7 +100,7 @@ func (q *Queue) ListDeadLetter(ctx context.Context, limit int64) ([]*job.Job, er
 		stop = -1
 	}
 
-	raw, err := q.rdb.LRange(ctx, deadLetterKey, 0, stop).Result()
+	raw, err := q.rdb.LRange(ctx, deadLetterKey(ctx), 0, stop).Result()
 
 	if err != nil {
 		return nil, fmt.Errorf("lrange dead letter: %w", err)
@@ -150,7 +141,7 @@ func (q *Queue) RequeueDeadLetter(ctx context.Context, jobID string) error {
 			return fmt.Errorf("marshal job for dead-letter removal: %w", err)
 		}
 
-		if err := q.rdb.LRem(ctx, deadLetterKey, 1, data).Err(); err != nil {
+		if err := q.rdb.LRem(ctx, deadLetterKey(ctx), 1, data).Err(); err != nil {
 			return fmt.Errorf("remove from dead letter: %w", err)
 		}
 
@@ -166,7 +157,7 @@ func (q *Queue) RequeueDeadLetter(ctx context.Context, jobID string) error {
 
 // PurgeDeadLetter deletes all dead-lettered jobs permanently.
 func (q *Queue) PurgeDeadLetter(ctx context.Context) error {
-	return q.rdb.Del(ctx, deadLetterKey).Err()
+	return q.rdb.Del(ctx, deadLetterKey(ctx)).Err()
 }
 
 // EnqueueDelayed schedules a job to become available at runAt, stored in a
@@ -178,7 +169,7 @@ func (q *Queue) EnqueueDelayed(ctx context.Context, j *job.Job, runAt time.Time)
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	return q.rdb.ZAdd(ctx, delayedKey, redis.Z{
+	return q.rdb.ZAdd(ctx, delayedKey(ctx), redis.Z{
 		Score:  float64(runAt.Unix()),
 		Member: data,
 	}).Err()
@@ -192,7 +183,7 @@ func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 
 	// fetches all delayed jobs with the socre <= now (i.e due to run)
 	due, err := q.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
-		Key:     delayedKey,
+		Key:     delayedKey(ctx),
 		Start:   "-inf",
 		Stop:    fmt.Sprintf("%f", now),
 		ByScore: true,
@@ -210,7 +201,7 @@ func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 		if err := q.rdb.LPush(ctx, keyFor(j.Priority), data).Err(); err != nil {
 			return 0, fmt.Errorf("push promoted job: %w", err)
 		}
-		if err := q.rdb.ZRem(ctx, delayedKey, data).Err(); err != nil {
+		if err := q.rdb.ZRem(ctx, delayedKey(ctx), data).Err(); err != nil {
 			return 0, fmt.Errorf("remove promoted job: %w", err)
 		}
 	}
@@ -402,4 +393,25 @@ func (q *Queue) EnqueueIdempotent(ctx context.Context, j *job.Job, ttl time.Dura
 	}
 
 	return true, nil
+}
+
+func pendingKey(ctx context.Context, p job.Priority) string {
+	t := tenant.FromContext(ctx)
+	base := map[job.Priority]string{
+		job.PriorityHigh:    "pending:high",
+		job.PriorityDefault: "pending:default",
+		job.PriorityLow:     "pending:low",
+	}[p]
+	if base == "" {
+		base = "pending:default"
+	}
+	return fmt.Sprintf("kairos:%s:%s", t, base)
+}
+
+func deadLetterKey(ctx context.Context) string {
+	return fmt.Sprintf("kairos:%s:dead_letter", tenant.FromContext(ctx))
+}
+
+func delayedKey(ctx context.Context) string {
+	return fmt.Sprintf("kairos:%s:delayed", tenant.FromContext(ctx))
 }

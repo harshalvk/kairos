@@ -15,6 +15,7 @@ import (
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
 	"github.com/harshalvk/kairos/internal/store"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/harshalvk/kairos/internal/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -33,12 +34,13 @@ type Pool struct {
 	nodeID      string
 	limiter     *ratelimit.Limiter
 	breaker     *circuitbreaker.Breaker
+	tenantID    string
 }
 
 // NewPool creates a worker pool with the given concurrency, node
 // identifier, and rate limiter (pass ratelimit.New() with no configured limits
 // if rate limiting is not needed
-func NewPool(queue *queue.Queue, store *store.Store, concurrency int, nodeID string, limiter *ratelimit.Limiter, breaker *circuitbreaker.Breaker) *Pool {
+func NewPool(queue *queue.Queue, store *store.Store, concurrency int, nodeID string, limiter *ratelimit.Limiter, breaker *circuitbreaker.Breaker, tenantID string) *Pool {
 	return &Pool{
 		queue:       queue,
 		store:       store,
@@ -47,6 +49,7 @@ func NewPool(queue *queue.Queue, store *store.Store, concurrency int, nodeID str
 		nodeID:      nodeID,
 		limiter:     limiter,
 		breaker:     breaker,
+		tenantID:    tenantID,
 	}
 }
 
@@ -90,6 +93,7 @@ func (wp *Pool) Start(ctx context.Context, shutdownTimeout time.Duration) {
 
 func (wp *Pool) runWorker(ctx context.Context, id int, wg *sync.WaitGroup) {
 	defer wg.Done()
+	ctx = tenant.WithContext(ctx, wp.tenantID)
 	logger := logging.FromContext(ctx).With(slog.Int("worker_id", id))
 
 	for {

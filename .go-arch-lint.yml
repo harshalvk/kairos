@@ -26,6 +26,8 @@ components:
     in: internal/logging
   tracing:
     in: internal/tracing
+  tenant:
+    in: internal/tenant
   queue:
     in: internal/queue
   store:
@@ -76,17 +78,23 @@ deps:
     anyVendorDeps: true
     mayDependOn:
       - circuitbreaker
+  tenant:
+    anyVendorDeps: true
+    mayDependOn:
+      - tenant
 
   queue:
     anyVendorDeps: true
     mayDependOn:
       - job
       - queue
+      - tenant
   store:
     anyVendorDeps: true
     mayDependOn:
       - job
       - store
+      - tenant
   streamqueue:
     anyVendorDeps: true
     mayDependOn:
@@ -106,6 +114,7 @@ deps:
       - circuitbreaker
       - logging
       - tracing
+      - tenant
 
   api:
     anyVendorDeps: true
@@ -141,6 +150,7 @@ deps:
       - leaderelection
       - logging
       - tracing
+      - tenant
       - queue
       - store
       - scheduler
@@ -161,6 +171,7 @@ deps:
       - leaderelection
       - logging
       - tracing
+      - tenant
       - queue
       - store
       - scheduler

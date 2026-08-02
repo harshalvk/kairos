@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,10 +25,10 @@ func NewStore(db *pgxpool.Pool) *Store {
 // RecordCreated inserts a new row when a job is first created.
 func (s *Store) RecordCreated(ctx context.Context, j *job.Job) error {
 	_, err := s.db.Exec(ctx, `
-		 INSERT INTO job_history (id, type, payload, status, attempts, max_attempts, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 INSERT INTO job_history (id, tenant_id type, payload, status, attempts, max_attempts, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (id) DO NOTHING
-	`, j.ID, j.Type, j.Payload, j.Status, j.Attempts, j.MaxAttempts, j.CreatedAt)
+	`, j.ID, tenant.FromContext(ctx), j.Type, j.Payload, j.Status, j.Attempts, j.MaxAttempts, j.CreatedAt)
 
 	if err != nil {
 		return fmt.Errorf("record created %w", err)
@@ -42,8 +43,8 @@ func (s *Store) RecordStatus(ctx context.Context, j *job.Job) error {
 	_, err := s.db.Exec(ctx, `
 		 UPDATE job_history
 		 SET status = $2, attempts = $3, last_error = $4, updated_at = now()
-		 WHERE id = $1
-	`, j.ID, j.Status, j.Attempts, j.LastError)
+		 WHERE id = $1 AND tenant_id = $5
+	`, j.ID, j.Status, j.Attempts, j.LastError, tenant.FromContext(ctx))
 
 	if err != nil {
 		return fmt.Errorf("record status: %w", err)
