@@ -10,7 +10,7 @@ A distributed job queue built from scratch in Go — a mini Sidekiq/Celery, with
 
 ## Why "Kairos"
 
-In ancient Greek, *chronos* is clock time — sequential, measured. *Kairos* is the right, opportune moment for something to happen. That's really what this queue is about: not running things fast, but running each job at the moment it's actually meant to run — after dependencies resolve, once backoff has passed, ahead of lower-priority work when it matters. Kairos felt like the right name for a system whose whole job is figuring out the right moment.
+In ancient Greek, _chronos_ is clock time — sequential, measured. _Kairos_ is the right, opportune moment for something to happen. That's really what this queue is about: not running things fast, but running each job at the moment it's actually meant to run — after dependencies resolve, once backoff has passed, ahead of lower-priority work when it matters. Kairos felt like the right name for a system whose whole job is figuring out the right moment.
 
 ## Why build this instead of using an existing library?
 
@@ -23,6 +23,7 @@ Libraries like Sidekiq, Celery, or Asynq solve this problem well — but using t
 This project builds each of those pieces manually, one at a time, with the reasoning behind each design decision documented alongside the code.
 
 ## Architecture
+
 <img width="6447" height="3411" alt="image" src="https://github.com/user-attachments/assets/af480ba5-f471-4763-9b4a-2f93a3b0664a" />
 
 - **Producer** enqueues jobs — plain, priority-tagged, dependency-linked, or idempotency-guarded.
@@ -80,6 +81,7 @@ kairos/
 ## Supported features
 
 **Core queue**
+
 - Priority queues (high/default/low), dequeued atomically via multi-key `BRPOP`
 - Job dependencies (DAGs) — jobs run only after declared dependencies complete; failures cascade
 - Idempotency keys — duplicate enqueues (same type + key) skipped via atomic `SETNX`
@@ -89,27 +91,32 @@ kairos/
 - Redis Streams alternative implementation for comparison (`internal/streamqueue`, see ADR 0020)
 
 **Resilience**
+
 - Per-job-type rate limiting (token bucket)
 - Per-job-type circuit breaker (closed/open/half-open)
 - Leader-elected scheduler with automatic failover (Redis `SETNX` + TTL)
 - Graceful shutdown — bounded drain of in-flight jobs
 
 **Multi-tenancy**
+
 - Context-propagated tenant identity across queue, store, worker, HTTP, and gRPC
 - Redis keys and Postgres rows fully namespaced per tenant
 - Auto-registering tenant registry — no manual provisioning step
 
 **Interfaces**
+
 - CLI (`cmd/producer`, `cmd/deadletter`)
 - Admin HTTP API (`chi` router, `X-Tenant-ID` header)
 - gRPC service + public Go client SDK (`pkg/kairosclient`)
 
 **Observability**
+
 - Structured JSON logging (`slog`), context-propagated
 - OpenTelemetry tracing (nested spans, exported to Jaeger)
 - Prometheus metrics + a pre-built Grafana dashboard
 
 **Developer experience**
+
 - golangci-lint, gosec, govulncheck, go-arch-lint (package boundary enforcement)
 - Unit, integration (testcontainers), fuzz, and load (k6) tests
 - Semantic-release — versioning driven entirely by Conventional Commits
@@ -136,7 +143,6 @@ docker exec -it kairos-postgres psql -U kairos -d kairos -f /0003_multi_tenancy.
 - **One worker pool serves exactly one tenant** — a tenant needs its own worker process(es) to have its jobs actually processed (ADR 0024).
 - **CLI tools default to the `default` tenant** with no flag to target another one yet.
 - **No authentication** on the admin HTTP API or gRPC service (ADR 0016, ADR 0021) — safe only on a trusted network today.
-```
 
 ## Requirements
 
