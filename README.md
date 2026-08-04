@@ -127,14 +127,7 @@ kairos/
 
 ```bash
 docker compose up -d --build
-
-# apply migrations in order (see "Known gaps" below)
-docker cp migrations/0001_init.sql kairos-postgres:/0001_init.sql
-docker exec -it kairos-postgres psql -U kairos -d kairos -f /0001_init.sql
-docker cp migrations/0002_recurring_jobs.sql kairos-postgres:/0002_recurring_jobs.sql
-docker exec -it kairos-postgres psql -U kairos -d kairos -f /0002_recurring_jobs.sql
-docker cp migrations/0003_multi_tenancy.sql kairos-postgres:/0003_multi_tenancy.sql
-docker exec -it kairos-postgres psql -U kairos -d kairos -f /0003_multi_tenancy.sql
+make migrate
 ```
 
 ## Known gaps

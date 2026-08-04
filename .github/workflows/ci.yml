@@ -61,9 +61,11 @@ jobs:
           go-version: "1.25"
           cache: true
 
+      - name: Install migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
       - name: Apply migrations
-        run: |
-          PGPASSWORD=kairos psql -h localhost -U kairos -d kairos -f migrations/0001_init.sql
+        run: migrate -path migrations -database "postgres://kairos:kairos@localhost:5432/kairos?sslmode=disable" up
 
       - name: Run tests
         run: go test -race -v ./...

@@ -1,3 +1,5 @@
+POSTGRES_DSN := postgres://kairos:kairos@localhost:5432/kairos?sslmode=disable
+
 SHELL := "C:\Windows\system32\bash.exe"
 .SHELLFLAGS := -ec
 
@@ -96,3 +98,12 @@ fuzz-queue:
 
 arch-lint:
 	go-arch-lint check
+
+migrate:
+	migrate -path migrations -database "$(POSTGRES_DSN)" up
+
+migrate-down:
+	migrate -path migrations -database "$(POSTGRES_DSN)" down 1
+
+migrate-status:
+	migrate -path migrations -database "$(POSTGRES_DSN)" version
