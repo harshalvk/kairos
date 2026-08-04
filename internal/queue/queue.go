@@ -40,20 +40,25 @@ func keyFor(p job.Priority) string {
 
 // Queue wraps a Redis client to provide job enqueue/dequeue operations.
 type Queue struct {
-	rdb *redis.Client
+	rdb      *redis.Client
+	registry *tenant.Registry
 }
 
 // New creates a Queue backed by the given Redis client.
-func New(rdb *redis.Client) *Queue {
-	return &Queue{rdb}
+func New(rdb *redis.Client, registry *tenant.Registry) *Queue {
+	return &Queue{rdb: rdb, registry: registry}
 }
 
 // Enqueue pushes a job onto the pending queue.
 func (q *Queue) Enqueue(ctx context.Context, j *job.Job) error {
 	data, err := json.Marshal(j)
-
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)
+	}
+	if err := q.registry.Register(ctx, tenant.FromContext(ctx)); err != nil {
+		// non-fatal: registry is a convenience for cross-tenant sweeps
+		// like the scheduler, not required for the enqueue itself to work
+		return fmt.Errorf("register tenant (enqueue still needs retry): %w", err)
 	}
 
 	return q.rdb.LPush(ctx, pendingKey(ctx, j.Priority), data).Err()

@@ -13,6 +13,7 @@ import (
 	"github.com/harshalvk/kairos/internal/leaderelection"
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -37,7 +38,8 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 
 	const (
 		lockTTL         = 15 * time.Second
@@ -67,15 +69,31 @@ func main() {
 
 		case <-acquireTicker.C:
 			if !elector.IsLeader() {
-				continue // standby node - not our turn
+				elector.TryAcquire(ctx)
+			} else if err := elector.Renew(ctx); err != nil {
+				logger.Warn("failed to renew leadership", slog.Any("error", err))
 			}
-			n, err := q.PromoteDueJobs(ctx)
-			if err != nil {
-				logger.Error("promote due jobs failed", slog.Any("error", err))
+
+		case <-promoteTicker.C:
+			if !elector.IsLeader() {
 				continue
 			}
-			if n > 0 {
-				logger.Info("promoted due jobs", slog.Int("count", n))
+
+			tenants, err := registry.List(ctx)
+			if err != nil {
+				logger.Error("failed to list tenants", slog.Any("error", err))
+				continue
+			}
+			for _, t := range tenants {
+				tenantCtx := tenant.WithContext(ctx, t)
+				n, err := q.PromoteDueJobs(tenantCtx)
+				if err != nil {
+					logger.Error("promote due jobs failed", slog.String("tenant_id", t), slog.Any("error", err))
+					continue
+				}
+				if n > 0 {
+					logger.Info("promoted due jobs", slog.String("tenant_id", t), slog.Int("count", n))
+				}
 			}
 		}
 	}

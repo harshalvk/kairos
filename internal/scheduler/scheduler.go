@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // RecurringJob defines a job type to be enqueued on a cron schedule
 type RecurringJob struct {
 	ID          string          `json:"id"`
+	TenantID    string          `json:"tenant_id"`
 	Name        string          `json:"name"`
 	JobType     string          `json:"job_type"`
 	Payload     json.RawMessage `json:"payload"`
@@ -36,9 +38,12 @@ func NewStore(db *pgxpool.Pool) *Store {
 
 // Create registers a new recurring job definition
 func (s *Store) Create(ctx context.Context, rj *RecurringJob) error {
+	if rj.TenantID == "" {
+		rj.TenantID = tenant.DefaultTenant
+	}
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO recurring_jobs (id, name, job_type, payload, cron_expr, max_attempts, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, rj.ID, rj.Name, rj.JobType, rj.Payload, rj.CronExpr, rj.MaxAttempts, rj.Enabled)
+		INSERT INTO recurring_jobs (id, tenant_id, name, job_type, payload, cron_expr, max_attempts, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, rj.ID, rj.TenantID, rj.Name, rj.JobType, rj.Payload, rj.CronExpr, rj.MaxAttempts, rj.Enabled)
 	if err != nil {
 		return fmt.Errorf("create recurring job: %w", err)
 	}
@@ -49,7 +54,7 @@ func (s *Store) Create(ctx context.Context, rj *RecurringJob) error {
 // ListEnabled returns all enabled recurring job definitions
 func (s *Store) ListEnabled(ctx context.Context) ([]*RecurringJob, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, name, job_type, payload, cron_expr, max_attempts, enabled, last_run_at FROM recurring_jobs WHERE enabled = true
+		SELECT id, tenant_id, name, job_type, payload, cron_expr, max_attempts, enabled, last_run_at, tenant_id FROM recurring_jobs WHERE enabled = true
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled recurring jobs: %w", err)
@@ -59,7 +64,7 @@ func (s *Store) ListEnabled(ctx context.Context) ([]*RecurringJob, error) {
 	var jobs []*RecurringJob
 	for rows.Next() {
 		var rj RecurringJob
-		if err := rows.Scan(&rj.ID, &rj.Name, &rj.JobType, &rj.Payload, &rj.CronExpr, &rj.MaxAttempts, &rj.Enabled, &rj.LastRunAt); err != nil {
+		if err := rows.Scan(&rj.ID, &rj.TenantID, &rj.Name, &rj.JobType, &rj.Payload, &rj.CronExpr, &rj.MaxAttempts, &rj.Enabled, &rj.LastRunAt); err != nil {
 			return nil, fmt.Errorf("scan recurring job: %w", err)
 		}
 		jobs = append(jobs, &rj)

@@ -99,7 +99,8 @@ deps:
       - job
   scheduler:
     anyVendorDeps: true
-    mayDependOn: []
+    mayDependOn:
+      - tenant
 
   worker:
     anyVendorDeps: true

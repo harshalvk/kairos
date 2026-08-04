@@ -6,6 +6,8 @@ package tenant
 import (
 	"context"
 	"errors"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type contextKey struct{}
@@ -16,6 +18,31 @@ var idKey = contextKey{}
 // backward compatibility for single-tanant deployments and existing
 // tests that don't set up tenant context
 const DefaultTenant = "default"
+
+// Registry tracks known tenant IDs, backed by redis, so processes that
+// neeed to operate across all tenants (like the scheduler) know which
+// namespaces exist without requiring static configuration
+type Registry struct {
+	rdb *redis.Client
+}
+
+const registryKey = "kairos:tenants"
+
+// NewRegistry creates a tenant registry backed by rdb
+func NewRegistry(rdb *redis.Client) *Registry {
+	return &Registry{rdb: rdb}
+}
+
+// Register records tenantID as known/active. called whenever a job is
+// enqueued for a tenant, so the registry stays current automatcially
+func (r *Registry) Register(ctx context.Context, tenantID string) error {
+	return r.rdb.SAdd(ctx, registryKey, tenantID).Err()
+}
+
+// List returns all known tenant IDs
+func (r *Registry) List(ctx context.Context) ([]string, error) {
+	return r.rdb.SMembers(ctx, registryKey).Result()
+}
 
 // WithContext attaches tenantID to ctx
 func WithContext(ctx context.Context, teanantID string) context.Context {

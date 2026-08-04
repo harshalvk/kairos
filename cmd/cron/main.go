@@ -15,6 +15,7 @@ import (
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/scheduler"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,7 +32,8 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 
 	pgDSN := os.Getenv("POSTGRES_DSN")
 	if pgDSN == "" {
@@ -58,12 +60,13 @@ func main() {
 	for _, rj := range recurringJobs {
 		rj := rj // capture loop varialbe for the closure below
 		_, err := c.AddFunc(rj.CronExpr, func() {
+			fireCtx := tenant.WithContext(ctx, rj.TenantID)
 			j := job.New(rj.JobType, rj.Payload, rj.MaxAttempts)
-			if err := q.Enqueue(ctx, j); err != nil {
+			if err := q.Enqueue(fireCtx, j); err != nil {
 				logger.Error("recurring job failed to enqueue", slog.String("job_name", rj.Name), slog.Any("error", err))
 				return
 			}
-			if err := store.RecordRun(ctx, rj.ID, j.CreatedAt); err != nil {
+			if err := store.RecordRun(fireCtx, rj.ID, j.CreatedAt); err != nil {
 				logger.Error("recurring job failed to record run", slog.String("job_name", rj.Name), slog.Any("error", err))
 			}
 			logger.Info("recurring job fired", slog.String("job_name", rj.Name), slog.String("job_id", j.ID))
