@@ -1,11 +1,9 @@
 version: 3
 workdir: .
 
-allow:
-  deepScan: false
-
-exclude:
-  - "**/*_test.go"
+excludeFiles:
+  - "^.*_test\\.go$"
+  - "^.*\\/test\\/.*$"
 
 vendors:
   allOtherVendors:
@@ -123,7 +121,7 @@ deps:
       - queue
       - store
       - logging
-      - api
+      - tenant
   grpcserver:
     anyVendorDeps: true
     mayDependOn:
@@ -131,6 +129,7 @@ deps:
       - queue
       - logging
       - kairospb
+      - tenant
 
   kairospb:
     anyVendorDeps: true

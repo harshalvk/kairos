@@ -9,8 +9,11 @@ import (
 
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/harshalvk/kairos/pkg/kairospb"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -120,4 +123,20 @@ func (s *Server) RequeueDeadLetter(ctx context.Context, req *kairospb.RequeueDea
 		return nil, status.Error(codes.NotFound, "job not found in dead-letter queue")
 	}
 	return &kairospb.RequeueDeadLetterResponse{Requeued: true}, nil
+}
+
+// TenantInterceptor reads a "tenant-id" gRPC metadata key and attaches
+// it to the request context, mirroring the admin api's X-Tenant-ID
+// header handling
+func TenantInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	tenantID := tenant.DefaultTenant
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("tenant-id"); len(vals) > 0 && vals[0] != "" {
+			tenantID = vals[0]
+		}
+	}
+	if err := tenant.Validate(tenantID); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid tenant-id metadata")
+	}
+	return handler(tenant.WithContext(ctx, tenantID), req)
 }

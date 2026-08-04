@@ -22,7 +22,7 @@ func main() {
 		}
 	}()
 
-	ctx := context.Background()
+	ctx := kairosclient.WithTenant(context.Background(), "harshal")
 	jobID, enqueued, err := client.Enqueue(ctx, "send_email", []byte(`{"to":"you@example.com"}`), kairosclient.EnqueueOptions{
 		Priority: kairospb.Priority_PRIORITY_HIGH,
 	})

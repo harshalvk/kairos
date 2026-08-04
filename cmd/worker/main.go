@@ -138,7 +138,7 @@ func main() {
 		}
 	}()
 
-	grpcSrv := grpc.NewServer()
+	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.TenantInterceptor))
 	kairospb.RegisterKairosServiceServer(grpcSrv, grpcserver.New(queue, logger))
 
 	go func() {

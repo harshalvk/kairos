@@ -11,6 +11,7 @@ import (
 	"github.com/harshalvk/kairos/pkg/kairospb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 func clampInt32(n int) int32 {
@@ -96,4 +97,10 @@ func (c *Client) RequeueDeadLetter(ctx context.Context, jobID string) error {
 		return fmt.Errorf("requeue dead letter: %w", err)
 	}
 	return nil
+}
+
+// WithTenant returns a context carrying tenantID as outgoing gRPC
+// metadata, for use with any client method
+func WithTenant(ctx context.Context, tenantID string) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, "tenant-id", tenantID)
 }

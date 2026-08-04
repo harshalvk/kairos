@@ -13,6 +13,7 @@ import (
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/store"
+	"github.com/harshalvk/kairos/internal/tenant"
 )
 
 // statusRecorder wraps http.ResponseWriter to capture the status code
@@ -68,6 +69,7 @@ func (s *Server) Routes() http.Handler {
 
 	r.Use(middleware.RequestID)
 	r.Use(s.loggingMiddleware)
+	r.Use(s.tenantMiddleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(10 * time.Second))
 
@@ -195,4 +197,19 @@ func (s *Server) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusCreated, map[string]string{"job_id": j.ID})
+}
+
+func (s *Server) tenantMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenantID := r.Header.Get(("X-Tenant-ID"))
+		if tenantID == "" {
+			tenantID = tenant.DefaultTenant
+		}
+		if err := tenant.Validate(tenantID); err != nil {
+			s.writeError(w, http.StatusBadRequest, "invalid X-Tenant-ID header")
+			return
+		}
+		ctx := tenant.WithContext(r.Context(), tenantID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
