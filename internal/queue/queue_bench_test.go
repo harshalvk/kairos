@@ -15,8 +15,7 @@ func BenchmarkJobMarshal(b *testing.B) {
 	}
 	j := job.New("send_email", payload, 3)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := json.Marshal(j); err != nil {
 			b.Fatal(err)
 		}
@@ -34,8 +33,7 @@ func BenchmarkJobUnmarshal(b *testing.B) {
 		log.Fatalf("failed to marshal data: %v", err)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var got job.Job
 		if err := json.Unmarshal(data, &got); err != nil {
 			b.Fatal(err)
