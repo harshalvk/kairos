@@ -33,6 +33,8 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
     ports:
       - "2112:2112"
+      - "8080:8080"
+      - "9090:9090"
     depends_on:
       - redis
       - db
@@ -45,7 +47,7 @@ services:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "9191:9090"
     depends_on:
       - worker
 

@@ -66,7 +66,7 @@ docker-build-deadletter:
 
 grafana: ## Open Grafana in the browser (admin/kairos, or anonymous viewer access)
 	@echo "Grafana: http://localhost:3000"
-	@echo "Prometheus: http://localhost:9090"
+	@echo "Prometheus: http://localhost:9191"
 
 bench: ## Run all benchmarks
 	go test -bench=. -benchmem ./...

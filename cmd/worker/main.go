@@ -30,6 +30,7 @@ import (
 	"github.com/harshalvk/kairos/internal/worker"
 	"github.com/harshalvk/kairos/pkg/kairospb"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
@@ -119,12 +120,31 @@ func main() {
 		}
 	}()
 
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+
+		srv := &http.Server{
+			Addr:              ":2112",
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+
+		logger.Info("metrics server listening", slog.String("addr", ":2112"))
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server error", slog.Any("error", err))
+		}
+	}()
+
 	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.TenantInterceptor))
 	kairospb.RegisterKairosServiceServer(grpcSrv, grpcserver.New(queue, logger))
 
 	go func() {
 		var lc net.ListenConfig
-		lis, err := lc.Listen(ctx, "tcp", ":9091")
+		lis, err := lc.Listen(ctx, "tcp", ":9090")
 		if err != nil {
 			logger.Error("failed to listen for grpc", slog.Any("error", err))
 			return
