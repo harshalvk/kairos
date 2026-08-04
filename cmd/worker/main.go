@@ -87,7 +87,8 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-	queue := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	queue := queue.New(rdb, registry)
 
 	limiter := ratelimit.New()
 	limiter.SetLimit("send_email", 5, 10) // 5/sec sustained, burst of 10

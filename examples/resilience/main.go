@@ -17,12 +17,14 @@ import (
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
+	"github.com/harshalvk/kairos/internal/tenant"
 )
 
 func main() {
 	ctx := context.Background()
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	payload, err := json.Marshal(map[string]string{"task": "demo"})
 	if err != nil {
 		panic(err)

@@ -40,7 +40,8 @@ func setupRedis(t *testing.T) *redis.Client {
 
 func TestEnqueueDequeue(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -59,7 +60,8 @@ func TestEnqueueDequeue(t *testing.T) {
 
 func TestDequeue_TimesOutWhenEmpty(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	_, err := q.Dequeue(ctx, 1*time.Second)
@@ -68,7 +70,8 @@ func TestDequeue_TimesOutWhenEmpty(t *testing.T) {
 
 func TestDeadLetter_MoveListRequeue(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -99,7 +102,8 @@ func TestDeadLetter_MoveListRequeue(t *testing.T) {
 
 func TestDelayedJobs_PromoteDueJobs(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -127,7 +131,8 @@ func TestDelayedJobs_PromoteDueJobs(t *testing.T) {
 
 func TestDequeue_PrioritizesHighOverDefault(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -147,7 +152,8 @@ func TestDequeue_PrioritizesHighOverDefault(t *testing.T) {
 
 func TestDependencies_ResolveOnCompletion(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -171,7 +177,8 @@ func TestDependencies_ResolveOnCompletion(t *testing.T) {
 
 func TestDependencies_CascadeFailOnUpstreamDeadLetter(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -192,7 +199,8 @@ func TestDependencies_CascadeFailOnUpstreamDeadLetter(t *testing.T) {
 
 func TestEnqueueIdempotent_SkipsDuplicateKey(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -220,7 +228,8 @@ func TestEnqueueIdempotent_SkipsDuplicateKey(t *testing.T) {
 
 func TestEnqueueIdempotent_DifferentTypesSameKeyBothEnqueue(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
 	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
@@ -278,7 +287,8 @@ func FuzzJobMarshalUnmarshalRoundTrip(f *testing.F) {
 
 func TestTenantIsolation_JobsDoNotCrossTenants(t *testing.T) {
 	rdb := setupRedis(t)
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 
 	ctxA := tenant.WithContext(context.Background(), "tenant-a")
 	ctxB := tenant.WithContext(context.Background(), "tenant-b")

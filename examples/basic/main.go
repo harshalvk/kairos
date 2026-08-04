@@ -28,7 +28,8 @@ func main() {
 	defer cancel()
 
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 
 	tenantID := os.Getenv("TENANT_ID")
 	if tenantID == "" {

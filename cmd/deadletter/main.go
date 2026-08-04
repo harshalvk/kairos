@@ -9,6 +9,7 @@ import (
 
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
+	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,7 +23,8 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-	q := queue.New(rdb)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	ctx := context.Background()
 	logger := logging.New("deadletter")
 	ctx = logging.WithContext(ctx, logger)

@@ -16,6 +16,7 @@ import (
 	"github.com/harshalvk/kairos/internal/api"
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
+	"github.com/harshalvk/kairos/internal/tenant"
 )
 
 func setupServer(t *testing.T) (*httptest.Server, *queue.Queue) {
@@ -30,8 +31,9 @@ func setupServer(t *testing.T) (*httptest.Server, *queue.Queue) {
 	require.NoError(t, err)
 	opts, err := redislib.ParseURL(connStr)
 	require.NoError(t, err)
-
-	q := queue.New(redislib.NewClient(opts))
+	rdb := redislib.NewClient(opts)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
 	logger := slog.Default()
 	srv := api.New(q, nil, logger)
 
