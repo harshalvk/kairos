@@ -11,6 +11,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
+	"github.com/harshalvk/kairos/internal/config"
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
@@ -21,26 +22,21 @@ import (
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	logger := logging.New("cron")
 	ctx = logging.WithContext(ctx, logger)
 
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	registry := tenant.NewRegistry(rdb)
 	q := queue.New(rdb, registry)
 
-	pgDSN := os.Getenv("POSTGRES_DSN")
-	if pgDSN == "" {
-		// #nosec G101
-		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
-	}
-	db, err := pgxpool.New(ctx, pgDSN)
+	db, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
 		logger.Error("failed to connect to postgrs", slog.Any("error", err))
 		os.Exit(1)

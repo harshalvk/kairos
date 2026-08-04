@@ -48,6 +48,8 @@ components:
     in: cmd/**
   examples:
     in: examples/**
+  config:
+    in: internal/config
 
 deps:
   job:
@@ -80,6 +82,9 @@ deps:
     anyVendorDeps: true
     mayDependOn:
       - tenant
+  config:
+    anyVendorDeps: true
+    mayDependOn: []
 
   queue:
     anyVendorDeps: true
@@ -160,6 +165,7 @@ deps:
       - grpcserver
       - kairospb
       - kairosclient
+      - config
 
   examples:
     anyVendorDeps: true

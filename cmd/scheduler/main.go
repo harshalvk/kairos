@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/harshalvk/kairos/internal/config"
 	"github.com/harshalvk/kairos/internal/leaderelection"
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
@@ -18,17 +19,14 @@ import (
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	nodeID := os.Getenv("NODE_ID")
-	if nodeID == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			hostname = "unknown"
-		}
-		nodeID = hostname
-	}
+	nodeID := cfg.NodeID
 
 	logger := logging.New(nodeID)
 	ctx = logging.WithContext(ctx, logger)

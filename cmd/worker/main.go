@@ -17,6 +17,7 @@ import (
 
 	"github.com/harshalvk/kairos/internal/api"
 	"github.com/harshalvk/kairos/internal/circuitbreaker"
+	"github.com/harshalvk/kairos/internal/config"
 	"github.com/harshalvk/kairos/internal/grpcserver"
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/logging"
@@ -52,26 +53,18 @@ func sendEmailHandler(_ context.Context, job *job.Job) error {
 // }
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	nodeID := os.Getenv("NODE_ID")
-	if nodeID == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			hostname = "unknown"
-		}
-		nodeID = hostname
-	}
-
+	nodeID := cfg.NodeID
 	logger := logging.New(nodeID)
 	ctx = logging.WithContext(ctx, logger)
 
-	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if otelEndpoint == "" {
-		otelEndpoint = "localhost:4318"
-	}
-	shutdownTracing, err := tracing.Setup(ctx, otelEndpoint, "kairos-worker")
+	shutdownTracing, err := tracing.Setup(ctx, cfg.OTELEndpoint, "kairos-worker")
 	if err != nil {
 		logger.Warn("tracing setup failed, continuing without tracing", slog.Any("error", err))
 	} else {
@@ -82,24 +75,14 @@ func main() {
 		}()
 	}
 
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	registry := tenant.NewRegistry(rdb)
 	queue := queue.New(rdb, registry)
 
 	limiter := ratelimit.New()
 	limiter.SetLimit("send_email", 5, 10) // 5/sec sustained, burst of 10
 
-	pgDSN := os.Getenv("POSTGRES_DSN")
-	if pgDSN == "" {
-		// #nosec G101 -- local developement default only, not a real
-		// credential. always set POSTGRES_DSN in any non-local env
-		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
-	}
-	db, err := pgxpool.New(ctx, pgDSN)
+	db, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
 		panic(err)
 	}
@@ -108,10 +91,7 @@ func main() {
 
 	breaker := circuitbreaker.New(5, 30*time.Second) // open after 5 consecutive fails, 30s cooldown
 
-	tenantID := os.Getenv("TENANT_ID")
-	if tenantID == "" {
-		tenantID = tenant.DefaultTenant
-	}
+	tenantID := cfg.TenantID
 	if err := tenant.Validate(tenantID); err != nil {
 		logger.Error("invalid TENANT_ID", slog.Any("error", err))
 		os.Exit(1)

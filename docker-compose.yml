@@ -27,6 +27,7 @@ services:
     container_name: kairos-worker
     environment:
       NODE_ID: docker-worker-1
+      TENANT_ID: default
       REDIS_ADDR: redis:6379
       POSTGRES_DSN: postgres://kairos:kairos@db:5432/kairos
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318

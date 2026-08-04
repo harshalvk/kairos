@@ -4,23 +4,22 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"os"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/harshalvk/kairos/internal/config"
 	"github.com/harshalvk/kairos/internal/scheduler"
 )
 
 func main() {
-	ctx := context.Background()
-	pgDSN := os.Getenv("POSTGRES_DSN")
-	if pgDSN == "" {
-		// #nosec G101 -- local development default only, not a real
-		// credential. alays set POSTGRES_DSN in any non-local env
-		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
 	}
-	db, err := pgxpool.New(ctx, pgDSN)
+	ctx := context.Background()
+
+	db, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
 		panic(err)
 	}

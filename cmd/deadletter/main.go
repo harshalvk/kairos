@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/harshalvk/kairos/internal/config"
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/tenant"
@@ -14,15 +15,15 @@ import (
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
 	action := flag.String("action", "list", "list | requeue | purge")
 	jobID := flag.String("id", "", "job ID (required for requeue)")
 	flag.Parse()
 
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	registry := tenant.NewRegistry(rdb)
 	q := queue.New(rdb, registry)
 	ctx := context.Background()

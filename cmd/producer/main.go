@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/harshalvk/kairos/internal/config"
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
@@ -17,23 +18,22 @@ import (
 )
 
 func main() {
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
+
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
 	}
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+
+	ctx := tenant.WithContext(context.Background(), cfg.TenantID)
+
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	registry := tenant.NewRegistry(rdb)
 	q := queue.New(rdb, registry)
-	ctx := context.Background()
+
 	logger := logging.New("producer")
 	ctx = logging.WithContext(ctx, logger)
 
-	pgDSN := os.Getenv("POSTGRES_DSN")
-	if pgDSN == "" {
-		// #nosec G101
-		pgDSN = "postgres://kairos:kairos@localhost:5432/kairos"
-	}
-	db, err := pgxpool.New(ctx, pgDSN)
+	db, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
 		logger.Error("failed to connect to postgres", slog.Any("error", err))
 		os.Exit(1)
