@@ -50,6 +50,8 @@ components:
     in: examples/**
   config:
     in: internal/config
+  kairos:
+    in: pkg/kairos
 
 deps:
   job:
@@ -144,6 +146,17 @@ deps:
     anyVendorDeps: true
     mayDependOn:
       - kairospb
+  kairos:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
+      - queue
+      - store
+      - worker
+      - ratelimit
+      - circuitbreaker
+      - logging
+      - tenant
 
   cmd:
     anyVendorDeps: true
@@ -187,3 +200,4 @@ deps:
       - grpcserver
       - kairospb
       - kairosclient
+      - kairos
