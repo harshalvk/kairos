@@ -2,16 +2,38 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"net/url"
+	"path/filepath"
 	"testing"
 
-	"github.com/harshalvk/kairos/internal/job"
-	"github.com/harshalvk/kairos/internal/store"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file" // registers the "file" source driver
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for pgx
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/store"
 )
+
+func migrationsSourceURL(t *testing.T) string {
+	t.Helper()
+	absPath, err := filepath.Abs("../../migrations")
+	require.NoError(t, err)
+
+	// On Windows, filepath.Abs returns a backslash path with a drive
+	// letter (e.g. D:\foo\bar). Concatenating "file://" + that path
+	// misparses the drive letter as a hostname with an invalid port.
+	// Building the URL via net/url with forward-slashed path produces
+	// the correct file:///D:/foo/bar form on any platform.
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}
+	return u.String()
+}
 
 func setupPostgres(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -21,38 +43,36 @@ func setupPostgres(t *testing.T) *pgxpool.Pool {
 		tcpostgres.WithDatabase("kairos"),
 		tcpostgres.WithUsername("kairos"),
 		tcpostgres.WithPassword("kairos"),
-		tcpostgres.BasicWaitStrategies())
+		tcpostgres.BasicWaitStrategies(),
+	)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, container.Terminate(ctx))
-	})
+	t.Cleanup(func() { require.NoError(t, container.Terminate(ctx)) })
 
 	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
+
+	// golang-migrate needs a database/sql connection (via pgx's stdlib
+	// driver), separate from the pgxpool.Pool the actual store code
+	// uses — migrate doesn't speak pgx's native pool interface directly.
+	sqlDB, err := sql.Open("pgx", connStr)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+	driver, err := postgres.WithInstance(sqlDB, &postgres.Config{})
+	require.NoError(t, err)
+
+	m, err := migrate.NewWithDatabaseInstance(migrationsSourceURL(t), "postgres", driver)
+	require.NoError(t, err)
+	if newDbInsterr := m.Up(); newDbInsterr != nil && err != migrate.ErrNoChange {
+		require.NoError(t, err)
+	}
 
 	pool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	_, err = pool.Exec(ctx, `
-CREATE TABLE job_history (
-id UUID PRIMARY KEY,
-tenant_id       TEXT NOT NULL DEFAULT 'default',
-type TEXT NOT NULL,
-payload JSONB NOT NULL,
-status TEXT NOT NULL,
-attempts INT NOT NULL DEFAULT 0,
-max_attempts INT NOT NULL,
-last_error TEXT,
-created_at TIMESTAMPTZ NOT NULL,
-updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-`)
-	require.NoError(t, err)
-
 	return pool
 }
-
 func TestRecordCreatedAndStatus(t *testing.T) {
 	pool := setupPostgres(t)
 	s := store.NewStore(pool)

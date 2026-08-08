@@ -75,6 +75,7 @@ func (s *Server) Routes() http.Handler {
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/queue/depth", s.handleQueueDepth)
+	r.Get("/jobs/{id}/result", s.handleGetResult)
 
 	r.Route("/jobs", func(r chi.Router) {
 		r.Post("/", s.handleEnqueue)
@@ -212,4 +213,21 @@ func (s *Server) tenantMiddleware(next http.Handler) http.Handler {
 		ctx := tenant.WithContext(r.Context(), tenantID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) handleGetResult(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if s.store == nil {
+		s.writeError(w, http.StatusNotImplemented, "result storage not configured")
+		return
+	}
+	result, err := s.store.GetResult(r.Context(), id)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, "job not found or has no result")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(result); err != nil {
+		s.logger.Error("failed to write result response", slog.String("job_id", id), slog.Any("error", err))
+	}
 }

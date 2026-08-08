@@ -4,6 +4,7 @@ package job
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,7 @@ type Job struct {
 	ID             string          `json:"id"`
 	Type           string          `json:"type"`
 	Payload        json.RawMessage `json:"payload"`
+	Result         json.RawMessage `json:"result,omitempty"`
 	Status         Status          `json:"status"`
 	Priority       Priority        `json:"priority"`
 	Attempts       int             `json:"attempts"`
@@ -85,4 +87,15 @@ func NewWithIdempotencyKey(jobType string, payload json.RawMessage, maxAttempts 
 	j := New(jobType, payload, maxAttempts)
 	j.IdempotencyKey = key
 	return j
+}
+
+// SetResult attaches a result to the job, to be persisted once it
+// completes successfully. v is json-marshaled
+func (j *Job) SetResult(v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+	j.Result = data
+	return nil
 }

@@ -32,6 +32,7 @@ type Job struct {
 	Type    string
 	Attempt int
 	raw     []byte
+	inner   *ijob.Job
 }
 
 // Bind unmarshals the job's payload into v.
@@ -106,7 +107,7 @@ func (k *Kairos) Handle(jobType string, fn HandlerFunc, opts ...JobOption) {
 		k.limiter.SetLimit(jobType, jo.rateLimit, jo.rateBurst)
 	}
 	k.pool.RegisterHandler(jobType, func(ctx context.Context, j *ijob.Job) error {
-		return fn(ctx, Job{ID: j.ID, Type: j.Type, Attempt: j.Attempts + 1, raw: j.Payload})
+		return fn(ctx, Job{ID: j.ID, Type: j.Type, Attempt: j.Attempts + 1, raw: j.Payload, inner: j})
 	})
 }
 
@@ -169,4 +170,28 @@ func (k *Kairos) Close() error {
 		k.db.Close()
 	}
 	return k.rdb.Close()
+}
+
+// Result retrieves the json result of jobID, if the handler set one via
+// Job.SetResult. requires WithPostgresDSN to have been configured
+func (k *Kairos) Result(ctx context.Context, jobID string, out any) error {
+	if k.store == nil {
+		return fmt.Errorf("kairos: Result requires WithPostgresDSN")
+	}
+	ctx = tenant.WithContext(ctx, k.cfg.tenantID)
+	raw, err := k.store.GetResult(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if raw == nil {
+		return fmt.Errorf("kairos: job %s has no result (not completed, or handler none)", jobID)
+	}
+	return json.Unmarshal(raw, out)
+}
+
+// SetResult attaches a result to the job, persisted once it completes
+// successfully (requires WithPostgresDSN). Retrieve it later via
+// Kairos.Result.
+func (j Job) SetResult(v any) error {
+	return j.inner.SetResult(v)
 }
