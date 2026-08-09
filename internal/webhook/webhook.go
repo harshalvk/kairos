@@ -128,12 +128,14 @@ func (d *Dispatcher) Run(ctx context.Context) {
 			// own next pool cycle rather than a separate delayed queue -
 			// acceptable given webhook delivery has a much shorter,
 			// coarser retry budget than job processing itself
-			go func() {
-				time.Sleep(time.Duration(del.Attempt) * 2 * time.Second)
-				if pushErr := d.rdb.LPush(context.Background(), deliveryQueueKey, data).Err(); pushErr != nil {
-					d.logger.Error("failed to re-push webhook delivery for retry", slog.Any("error", pushErr))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Duration(del.Attempt) * 2 * time.Second):
+				if err := d.rdb.LPush(ctx, deliveryQueueKey, data).Err(); err != nil {
+					d.logger.Error("failed to re-enqueue webhook delivery", slog.Any("error", err))
 				}
-			}()
+			}
 		}
 	}
 }
