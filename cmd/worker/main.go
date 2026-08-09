@@ -27,6 +27,7 @@ import (
 	"github.com/harshalvk/kairos/internal/store"
 	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/harshalvk/kairos/internal/tracing"
+	"github.com/harshalvk/kairos/internal/webhook"
 	"github.com/harshalvk/kairos/internal/worker"
 	"github.com/harshalvk/kairos/pkg/kairospb"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -97,8 +98,10 @@ func main() {
 		logger.Error("invalid TENANT_ID", slog.Any("error", err))
 		os.Exit(1)
 	}
+	dispatcher := webhook.New(rdb, logger)
+	go dispatcher.Run(ctx)
 
-	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker, tenantID) // 5 concurrent workers
+	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker, tenantID, dispatcher) // 5 concurrent workers
 	pool.RegisterHandler("send_email", sendEmailHandler)
 
 	apiServer := api.New(queue, store, logger)

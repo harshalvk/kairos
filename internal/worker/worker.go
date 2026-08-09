@@ -17,6 +17,7 @@ import (
 	"github.com/harshalvk/kairos/internal/store"
 	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/harshalvk/kairos/internal/tracing"
+	"github.com/harshalvk/kairos/internal/webhook"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -35,12 +36,13 @@ type Pool struct {
 	limiter     *ratelimit.Limiter
 	breaker     *circuitbreaker.Breaker
 	tenantID    string
+	webhooks    *webhook.Dispatcher
 }
 
 // NewPool creates a worker pool with the given concurrency, node
 // identifier, and rate limiter (pass ratelimit.New() with no configured limits
 // if rate limiting is not needed
-func NewPool(queue *queue.Queue, store *store.Store, concurrency int, nodeID string, limiter *ratelimit.Limiter, breaker *circuitbreaker.Breaker, tenantID string) *Pool {
+func NewPool(queue *queue.Queue, store *store.Store, concurrency int, nodeID string, limiter *ratelimit.Limiter, breaker *circuitbreaker.Breaker, tenantID string, webhooks *webhook.Dispatcher) *Pool {
 	return &Pool{
 		queue:       queue,
 		store:       store,
@@ -50,6 +52,7 @@ func NewPool(queue *queue.Queue, store *store.Store, concurrency int, nodeID str
 		limiter:     limiter,
 		breaker:     breaker,
 		tenantID:    tenantID,
+		webhooks:    webhooks,
 	}
 }
 
@@ -179,6 +182,9 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 		if err := wp.queue.ResolveDependents(ctx, j.ID); err != nil {
 			logger.Error("failed to resolve dependents", slog.Any("error", err))
 		}
+		if err := wp.webhooks.Notify(ctx, j, "completed"); err != nil {
+			logger.Warn("failed to enqueue webhook notification", slog.Any("error", err))
+		}
 
 		span.SetStatus(codes.Ok, "completed")
 		logger.Info("job completed", slog.Duration("duration", duration))
@@ -245,6 +251,9 @@ func (wp *Pool) moveToDeadLetter(ctx context.Context, j *job.Job) {
 	}
 	if err := wp.queue.CascadeFailDependents(ctx, j.ID); err != nil {
 		logger.Error("failed to cascade-fail dependents", slog.Any("error", err))
+	}
+	if err := wp.webhooks.Notify(ctx, j, "dead_letter"); err != nil {
+		logger.Warn("failed to enqueue webhook notification", slog.Any("error", err))
 	}
 
 	logger.Warn("job moved to dead-letter", slog.Int("attempts", j.Attempts))

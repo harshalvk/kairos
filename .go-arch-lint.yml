@@ -52,8 +52,14 @@ components:
     in: internal/config
   kairos:
     in: pkg/kairos
+  webhook:
+    in: internal/webhook
 
 deps:
+  webhook:
+    anyVendorDeps: true
+    mayDependOn:
+      - job
   job:
     anyVendorDeps: true
     mayDependOn:
@@ -121,6 +127,7 @@ deps:
       - logging
       - tracing
       - tenant
+      - webhook
 
   api:
     anyVendorDeps: true
@@ -157,6 +164,7 @@ deps:
       - circuitbreaker
       - logging
       - tenant
+      - webhook
 
   cmd:
     anyVendorDeps: true
@@ -179,6 +187,7 @@ deps:
       - kairospb
       - kairosclient
       - config
+      - webhook
 
   examples:
     anyVendorDeps: true
@@ -201,3 +210,4 @@ deps:
       - kairospb
       - kairosclient
       - kairos
+      - webhook

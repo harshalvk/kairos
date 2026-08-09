@@ -33,6 +33,12 @@ const (
 	StatusDeadLetter Status = "dead_letter"
 )
 
+// WebhookConfig configures an http callback fired on job lifecycle events
+type WebhookConfig struct {
+	URL    string   `json:"url"`
+	Events []string `json:"events"` // subset of: 'completed', 'failed', 'dead_letter'
+}
+
 // Job represents a single unit of work to be processed by a worker.
 type Job struct {
 	ID             string          `json:"id"`
@@ -48,6 +54,7 @@ type Job struct {
 	LastError      string          `json:"last_error,omitempty"`
 	DependsOn      []string        `json:"depends_on,omitempty"`
 	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	Webhook        *WebhookConfig  `json:"webhook,omitempty"`
 }
 
 // New creates a new Job with a generated UUID and pending status.

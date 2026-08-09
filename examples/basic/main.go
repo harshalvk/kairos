@@ -17,15 +17,19 @@ import (
 
 	"github.com/harshalvk/kairos/internal/circuitbreaker"
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/logging"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/ratelimit"
 	"github.com/harshalvk/kairos/internal/tenant"
+	"github.com/harshalvk/kairos/internal/webhook"
 	"github.com/harshalvk/kairos/internal/worker"
 )
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	logger := logging.New("example-basic")
 
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 	registry := tenant.NewRegistry(rdb)
@@ -41,7 +45,8 @@ func main() {
 	}
 
 	attempts := 0
-	pool := worker.NewPool(q, nil, 2, "basic-example", ratelimit.New(), circuitbreaker.New(5, time.Minute), tenantID)
+	dispatcher := webhook.New(rdb, logger)
+	pool := worker.NewPool(q, nil, 2, "basic-example", ratelimit.New(), circuitbreaker.New(5, time.Minute), "default", dispatcher)
 	pool.RegisterHandler("flaky_task", func(_ context.Context, j *job.Job) error {
 		attempts++
 		if attempts < 3 {

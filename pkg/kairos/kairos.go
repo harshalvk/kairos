@@ -21,6 +21,7 @@ import (
 	"github.com/harshalvk/kairos/internal/ratelimit"
 	"github.com/harshalvk/kairos/internal/store"
 	"github.com/harshalvk/kairos/internal/tenant"
+	"github.com/harshalvk/kairos/internal/webhook"
 	"github.com/harshalvk/kairos/internal/worker"
 )
 
@@ -46,15 +47,16 @@ type HandlerFunc func(ctx context.Context, j Job) error
 
 // Kairos is the top-level client: register handlers, enqueue jobs, run.
 type Kairos struct {
-	cfg     config
-	rdb     *redis.Client
-	db      *pgxpool.Pool
-	queue   *queue.Queue
-	store   *store.Store
-	limiter *ratelimit.Limiter
-	breaker *circuitbreaker.Breaker
-	logger  *slog.Logger
-	pool    *worker.Pool
+	cfg        config
+	rdb        *redis.Client
+	db         *pgxpool.Pool
+	queue      *queue.Queue
+	store      *store.Store
+	limiter    *ratelimit.Limiter
+	breaker    *circuitbreaker.Breaker
+	logger     *slog.Logger
+	pool       *worker.Pool
+	dispatcher *webhook.Dispatcher
 }
 
 // New connects to Redis (and Postgres, if configured) and returns a
@@ -89,11 +91,13 @@ func New(opts ...Option) (*Kairos, error) {
 
 	limiter := ratelimit.New()
 	breaker := circuitbreaker.New(cfg.circuitThreshold, cfg.circuitCooldown)
-	pool := worker.NewPool(q, s, cfg.concurrency, cfg.nodeID, limiter, breaker, cfg.tenantID)
+	dispatcher := webhook.New(rdb, logger)
+	pool := worker.NewPool(q, s, cfg.concurrency, cfg.nodeID, limiter, breaker, cfg.tenantID, dispatcher)
 
 	return &Kairos{
 		cfg: cfg, rdb: rdb, queue: q, store: s,
 		limiter: limiter, breaker: breaker, logger: logger, pool: pool,
+		dispatcher: dispatcher,
 	}, nil
 }
 
@@ -161,6 +165,9 @@ func (k *Kairos) Enqueue(ctx context.Context, jobType string, payload any, opts 
 func (k *Kairos) Run(ctx context.Context, shutdownTimeout time.Duration) {
 	ctx = tenant.WithContext(ctx, k.cfg.tenantID)
 	ctx = logging.WithContext(ctx, k.logger)
+
+	go k.dispatcher.Run(ctx)
+
 	k.pool.Start(ctx, shutdownTimeout)
 }
 

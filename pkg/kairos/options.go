@@ -85,6 +85,7 @@ type enqueueOptions struct {
 	priority       job.Priority
 	dependsOn      []string
 	idempotencyKey string
+	webhook        *job.WebhookConfig
 }
 
 // EnqueueOption configures a single Enqueue call.
@@ -113,3 +114,9 @@ const (
 	Default = job.PriorityDefault
 	Low     = job.PriorityLow
 )
+
+// WithWebhook configures a callback URL fired on the given lifecycle
+// events (subset of "completed", "failed", "dead_letter").
+func WithWebhook(url string, events ...string) EnqueueOption {
+	return func(o *enqueueOptions) { o.webhook = &job.WebhookConfig{URL: url, Events: events} }
+}
