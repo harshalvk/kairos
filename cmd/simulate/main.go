@@ -1,7 +1,11 @@
-// Command simulate seeds the queue with a realistic mix of jobs across
-// priorities and types — including some pre-failed dead-lettered jobs —
-// purely so there's real data to look at in the TUI or dashboards
-// without needing to run a full application against Kairos.
+// Command simulate seeds the queue with realistic-looking fake data for
+// local testing and demos — pending jobs, dead-lettered jobs, and
+// delayed jobs across a handful of job type templates.
+//
+// #nosec G404 -- math/rand is used throughout this file purely to
+// generate varied fake demo data (order IDs, image IDs, etc.), never
+// for anything security-sensitive. crypto/rand would add overhead and
+// API awkwardness for zero actual benefit here.
 package main
 
 import (
