@@ -202,3 +202,32 @@ func (k *Kairos) Result(ctx context.Context, jobID string, out any) error {
 func (j Job) SetResult(v any) error {
 	return j.inner.SetResult(v)
 }
+
+// EnqueueBatch submits any jobs of jobType in a single redis round-trip
+// -- significantly faster than calling enqueus in a loop for bulk work
+// (e,g. importing a csv). dependencies and idempotency keys are not
+// supported per-item in a batch; use enqueue for those
+func (k *Kairos) EnqueueBatch(ctx context.Context, jobType string, payloads []any, opts ...EnqueueOption) ([]string, error) {
+	eo := enqueueOptions{maxAttempts: 3, priority: ijob.PriorityDefault}
+	for _, opt := range opts {
+		opt(&eo)
+	}
+	ctx = tenant.WithContext(ctx, k.cfg.tenantID)
+
+	jobs := make([]*ijob.Job, len(payloads))
+	ids := make([]string, len(payloads))
+	for i, p := range payloads {
+		data, err := json.Marshal(p)
+		if err != nil {
+			return nil, fmt.Errorf("kairos: marshal payload %d: %w", i, err)
+		}
+		j := ijob.NewWithPriority(jobType, data, eo.maxAttempts, eo.priority)
+		jobs[i] = j
+		ids[i] = j.ID
+	}
+
+	if err := k.queue.EnqueueBatch(ctx, jobs); err != nil {
+		return nil, fmt.Errorf("kairos: enqueue batch: %w", err)
+	}
+	return ids, nil
+}
