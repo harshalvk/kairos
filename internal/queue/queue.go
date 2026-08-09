@@ -415,3 +415,29 @@ func deadLetterKey(ctx context.Context) string {
 func delayedKey(ctx context.Context) string {
 	return fmt.Sprintf("kairos:%s:delayed", tenant.FromContext(ctx))
 }
+
+// EnqueueBatch pushes all of jobs onto their priority-appropriate
+// pending queus in a single pipelined round-trip, rather than one
+// round-trip per job
+func (q *Queue) EnqueueBatch(ctx context.Context, jobs []*job.Job) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	pipe := q.rdb.Pipeline()
+	for _, j := range jobs {
+		data, err := json.Marshal(j)
+		if err != nil {
+			return fmt.Errorf("marshal job %s: %w", j.ID, err)
+		}
+		pipe.LPush(ctx, pendingKey(ctx, j.Priority), data)
+	}
+	if err := q.registry.Register(ctx, tenant.FromContext(ctx)); err != nil {
+		return fmt.Errorf("register tenant: %w", err)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("enqueue batch: %w", err)
+	}
+	return nil
+}

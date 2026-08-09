@@ -308,3 +308,31 @@ func TestTenantIsolation_JobsDoNotCrossTenants(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, j.ID, got.ID)
 }
+
+func TestEnqueueBatch_AllJobsLand(t *testing.T) {
+	rdb := setupRedis(t)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
+	ctx := context.Background()
+
+	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
+	require.NoError(t, err)
+
+	jobs := make([]*job.Job, 50)
+	for i := range jobs {
+		jobs[i] = job.New("send_email", payload, 3)
+	}
+
+	require.NoError(t, q.EnqueueBatch(ctx, jobs))
+
+	depth, err := q.Depth(ctx, job.PriorityDefault)
+	require.NoError(t, err)
+	assert.Equal(t, int64(50), depth)
+}
+
+func TestEnqueueBatch_EmptySliceIsNoop(t *testing.T) {
+	rdb := setupRedis(t)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
+	assert.NoError(t, q.EnqueueBatch(context.Background(), nil))
+}
