@@ -31,13 +31,6 @@ var pendingKeys = map[job.Priority]string{
 func waitingCountKey(jobID string) string { return waitingCountKeyPrefix + jobID }
 func dependentsKey(jobID string) string   { return dependentsKeyPrefix + jobID }
 
-func keyFor(p job.Priority) string {
-	if key, ok := pendingKeys[p]; ok {
-		return key
-	}
-	return pendingKeys[job.PriorityDefault] // unknown priority falls back to default
-}
-
 // Queue wraps a Redis client to provide job enqueue/dequeue operations.
 type Queue struct {
 	rdb      *redis.Client
@@ -211,7 +204,7 @@ func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 
 // Depth returns the current number of pending jobs.
 func (q *Queue) Depth(ctx context.Context, p job.Priority) (int64, error) {
-	return q.rdb.LLen(ctx, keyFor(p)).Result()
+	return q.rdb.LLen(ctx, pendingKey(ctx, p)).Result()
 }
 
 // TotalDepth retuns the sum of pending jobs across all priority levels
@@ -432,12 +425,13 @@ func (q *Queue) EnqueueBatch(ctx context.Context, jobs []*job.Job) error {
 		}
 		pipe.LPush(ctx, pendingKey(ctx, j.Priority), data)
 	}
-	if err := q.registry.Register(ctx, tenant.FromContext(ctx)); err != nil {
-		return fmt.Errorf("register tenant: %w", err)
-	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("enqueue batch: %w", err)
+	}
+
+	if err := q.registry.Register(ctx, tenant.FromContext(ctx)); err != nil {
+		return fmt.Errorf("register tenant: %w", err)
 	}
 	return nil
 }
