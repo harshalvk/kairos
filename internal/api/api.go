@@ -226,7 +226,13 @@ func (s *Server) handleGetResult(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "job not found or has no result")
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// #nosec G705 -- result is read from a jsonb Postgres column (always
+	// valid JSON by construction) and served with an explicit JSON
+	// content-type plus nosniff, so it can never be interpreted as HTML
+	// by a browser. This is not an XSS vector.
 	if _, err := w.Write(result); err != nil {
 		s.logger.Error("failed to write result response", slog.String("job_id", id), slog.Any("error", err))
 	}
