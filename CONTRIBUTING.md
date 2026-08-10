@@ -103,3 +103,25 @@ example of why "what did you actually run" matters).
 PRs follow the template in `.github/PULL_REQUEST_TEMPLATE.md` — What /
 Why / Changes / How to verify / Known limitations, the same structure
 every commit and ADR in this project already follows.
+
+## API compatibility
+
+Kairos has three independently-versioned-in-spirit but jointly-tagged
+API surfaces:
+
+- **gRPC** (`proto/kairos/v1/`) — versioned in the proto package name
+  itself (`kairos.v1`). A breaking change adds `kairos.v2` alongside
+  it; existing `v1` clients keep working against an unchanged service.
+- **Admin HTTP API** — versioned via URL prefix (`/v1/...`). Same
+  policy: a breaking change adds `/v2/...`, `/v1/...` keeps serving.
+- **Go packages** (`pkg/kairos`, `pkg/kairosclient`) — versioned via
+  the module's own Go SemVer tag (enforced by semantic-release, see
+  ADR 0022). A `BREAKING CHANGE:` commit footer triggers a major
+  version bump; per Go modules convention, a v2+ module needs its
+  import path updated to `.../kairos/v2` (Go's own compatibility rule,
+  not a Kairos-specific choice).
+
+Before merging a change to any of these three surfaces, ask: does this
+break an existing caller? If yes, it needs a new version alongside the
+old one (v2 proto package, /v2 HTTP prefix, or a major Go version
+bump) — not an in-place change.
