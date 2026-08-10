@@ -140,3 +140,10 @@ func TenantInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, ha
 	}
 	return handler(tenant.WithContext(ctx, tenantID), req)
 }
+
+// Register registers srv on grpcServer — a small convenience so
+// callers (including tests) don't need to import pkg/kairospb
+// directly just to wire the service up.
+func Register(grpcServer *grpc.Server, srv *Server) {
+	kairospb.RegisterKairosServiceServer(grpcServer, srv)
+}
