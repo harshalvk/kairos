@@ -1,6 +1,10 @@
 version: 3
 workdir: .
 
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
 excludeFiles:
   - "^.*_test\\.go$"
   - "^.*\\/test\\/.*$"
@@ -62,49 +66,31 @@ deps:
       - job
   job:
     anyVendorDeps: true
-    mayDependOn:
-      - job
   metrics:
     anyVendorDeps: true
-    mayDependOn: []
   logging:
     anyVendorDeps: true
-    mayDependOn:
-      - logging
   tracing:
     anyVendorDeps: true
-    mayDependOn: []
   leaderelection:
     anyVendorDeps: true
-    mayDependOn:
-      - leaderelection
   ratelimit:
     anyVendorDeps: true
-    mayDependOn:
-      - ratelimit
   circuitbreaker:
     anyVendorDeps: true
-    mayDependOn:
-      - circuitbreaker
   tenant:
     anyVendorDeps: true
-    mayDependOn:
-      - tenant
   config:
     anyVendorDeps: true
-    mayDependOn: []
-
   queue:
     anyVendorDeps: true
     mayDependOn:
       - job
-      - queue
       - tenant
   store:
     anyVendorDeps: true
     mayDependOn:
       - job
-      - store
       - tenant
   streamqueue:
     anyVendorDeps: true
@@ -114,7 +100,6 @@ deps:
     anyVendorDeps: true
     mayDependOn:
       - tenant
-
   worker:
     anyVendorDeps: true
     mayDependOn:
@@ -128,7 +113,6 @@ deps:
       - tracing
       - tenant
       - webhook
-
   api:
     anyVendorDeps: true
     mayDependOn:
@@ -145,10 +129,8 @@ deps:
       - logging
       - kairospb
       - tenant
-
   kairospb:
     anyVendorDeps: true
-    mayDependOn: []
   kairosclient:
     anyVendorDeps: true
     mayDependOn:
@@ -165,7 +147,6 @@ deps:
       - logging
       - tenant
       - webhook
-
   cmd:
     anyVendorDeps: true
     mayDependOn:
@@ -188,7 +169,6 @@ deps:
       - kairosclient
       - config
       - webhook
-
   examples:
     anyVendorDeps: true
     mayDependOn:
