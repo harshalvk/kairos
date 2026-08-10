@@ -74,15 +74,17 @@ func (s *Server) Routes() http.Handler {
 	r.Use(middleware.Timeout(10 * time.Second))
 
 	r.Get("/healthz", s.handleHealthz)
-	r.Get("/queue/depth", s.handleQueueDepth)
-	r.Get("/jobs/{id}/result", s.handleGetResult)
 
-	r.Route("/jobs", func(r chi.Router) {
-		r.Post("/", s.handleEnqueue)
-		r.Route("/dead-letter", func(r chi.Router) {
-			r.Get("/", s.handleListDeadLetter)
-			r.Delete("/", s.handlePurgeDeadLetter)
-			r.Post("/{id}/requeue", s.handleRequeueDeadLetter)
+	r.Route("/v1", func(r chi.Router) {
+		r.Get("/jobs/{id}/result", s.handleGetResult)
+		r.Get("/queue/depth", s.handleQueueDepth)
+		r.Route("/jobs", func(r chi.Router) {
+			r.Post("/", s.handleEnqueue)
+			r.Route("/dead-letter", func(r chi.Router) {
+				r.Get("/", s.handleListDeadLetter)
+				r.Delete("/", s.handlePurgeDeadLetter)
+				r.Post("/{id}/requeue", s.handleRequeueDeadLetter)
+			})
 		})
 	})
 

@@ -91,11 +91,11 @@ func (m model) Init() tea.Cmd {
 
 func refresh() (depthResp, []deadLetterJob, error) {
 	var depths depthResp
-	if err := fetchJSON(apiBase+"/queue/depth", &depths); err != nil {
+	if err := fetchJSON(apiBase+"/v1/queue/depth", &depths); err != nil {
 		return nil, nil, err
 	}
 	var dead []deadLetterJob
-	if err := fetchJSON(apiBase+"/jobs/dead-letter", &dead); err != nil {
+	if err := fetchJSON(apiBase+"/v1/jobs/dead-letter", &dead); err != nil {
 		// Queue depth succeeded but dead-letter fetch failed — don't
 		// treat the whole refresh as an error, just show what we have.
 		dead = nil
@@ -131,7 +131,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(row) > 0 {
 					id := row[0]
 					go func() {
-						req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, apiBase+"/jobs/dead-letter/"+id+"/requeue", nil)
+						req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, apiBase+"/v1/jobs/dead-letter/"+id+"/requeue", nil)
 						if err != nil {
 							return
 						}

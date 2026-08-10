@@ -88,14 +88,14 @@ func TestHealthz(t *testing.T) {
 func TestQueueDepth_EmptyQueue(t *testing.T) {
 	ts, _ := setupServer(t)
 
-	resp := doRequest(t, http.MethodGet, ts.URL+"/queue/depth", nil)
+	resp := doRequest(t, http.MethodGet, ts.URL+"/v1/queue/depth", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestRequeueDeadLetter_NotFound(t *testing.T) {
 	ts, _ := setupServer(t)
 
-	resp := doRequest(t, http.MethodPost, ts.URL+"/jobs/dead-letter/nonexistent-id/requeue", nil)
+	resp := doRequest(t, http.MethodPost, ts.URL+"/v1/jobs/dead-letter/nonexistent-id/requeue", nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
@@ -107,7 +107,7 @@ func TestRequeueDeadLetter_Success(t *testing.T) {
 	j.Attempts = 3
 	require.NoError(t, q.MoveToDeadLetter(ctx, j))
 
-	resp := doRequest(t, http.MethodPost, ts.URL+"/jobs/dead-letter/"+j.ID+"/requeue", nil)
+	resp := doRequest(t, http.MethodPost, ts.URL+"/v1/jobs/dead-letter/"+j.ID+"/requeue", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
@@ -118,13 +118,13 @@ func TestListDeadLetter(t *testing.T) {
 	j := job.New("send_email", []byte(`{"to":"test@example.com"}`), 3)
 	require.NoError(t, q.MoveToDeadLetter(ctx, j))
 
-	resp := doRequest(t, http.MethodGet, ts.URL+"/jobs/dead-letter", nil)
+	resp := doRequest(t, http.MethodGet, ts.URL+"/v1/jobs/dead-letter", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestPurgeDeadLetter(t *testing.T) {
 	ts, _ := setupServer(t)
 
-	resp := doRequest(t, http.MethodDelete, ts.URL+"/jobs/dead-letter", nil)
+	resp := doRequest(t, http.MethodDelete, ts.URL+"/v1/jobs/dead-letter", nil)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

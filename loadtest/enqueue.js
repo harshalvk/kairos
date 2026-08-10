@@ -18,7 +18,7 @@ export const options = {
   },
 };
 
-const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
+const BASE_URL = __ENV.BASE_URL || "http://localhost:8080/v1";
 
 export default function () {
   const payload = JSON.stringify({
@@ -28,8 +28,7 @@ export default function () {
   });
 
   const res = http.post(`${BASE_URL}/jobs`, payload, {
-    headers: { "Content-Type": "application/json"},
-
+    headers: { "Content-Type": "application/json" },
   });
 
   check(res, {
