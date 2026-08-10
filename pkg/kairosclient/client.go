@@ -104,3 +104,16 @@ func (c *Client) RequeueDeadLetter(ctx context.Context, jobID string) error {
 func WithTenant(ctx context.Context, tenantID string) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, "tenant-id", tenantID)
 }
+
+// ConnectWithOptions is like Connect but accepts additional grpc.DialOptions
+// — primarily for testing (e.g. bufconn) or advanced transport
+// configuration (custom TLS, interceptors) that Connect's simple
+// signature doesn't expose.
+func ConnectWithOptions(addr string, opts ...grpc.DialOption) (*Client, error) {
+	allOpts := append([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, opts...)
+	conn, err := grpc.NewClient(addr, allOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("connect to kairos: %w", err)
+	}
+	return &Client{conn: conn, rpc: kairospb.NewKairosServiceClient(conn)}, nil
+}
