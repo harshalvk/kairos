@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -79,7 +80,18 @@ func main() {
 
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	registry := tenant.NewRegistry(rdb)
-	queue := queue.New(rdb, registry)
+
+	shardAddrs := strings.Split(os.Getenv("REDIS_SHARD_ADDRS"), ",")
+	var q *queue.Queue
+	if len(shardAddrs) > 1 {
+		clients := make([]*redis.Client, len(shardAddrs))
+		for i, addr := range shardAddrs {
+			clients[i] = redis.NewClient(&redis.Options{Addr: addr})
+		}
+		q = queue.NewSharded(clients, registry)
+	} else {
+		q = queue.New(rdb, registry)
+	}
 
 	limiter := ratelimit.New()
 	limiter.SetLimit("send_email", 5, 10) // 5/sec sustained, burst of 10
@@ -101,10 +113,10 @@ func main() {
 	dispatcher := webhook.New(rdb, logger)
 	go dispatcher.Run(ctx)
 
-	pool := worker.NewPool(queue, store, 5, nodeID, limiter, breaker, tenantID, dispatcher) // 5 concurrent workers
+	pool := worker.NewPool(q, store, 5, nodeID, limiter, breaker, tenantID, dispatcher) // 5 concurrent workers
 	pool.RegisterHandler("send_email", sendEmailHandler)
 
-	apiServer := api.New(queue, store, logger)
+	apiServer := api.New(q, store, logger)
 
 	go func() {
 		logger.Info("admin api listening", slog.String("addr", ":8080"))
@@ -143,7 +155,7 @@ func main() {
 	}()
 
 	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.TenantInterceptor))
-	kairospb.RegisterKairosServiceServer(grpcSrv, grpcserver.New(queue, logger))
+	kairospb.RegisterKairosServiceServer(grpcSrv, grpcserver.New(q, logger))
 
 	go func() {
 		var lc net.ListenConfig
@@ -166,7 +178,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				depth, err := queue.TotalDepth(ctx)
+				depth, err := q.TotalDepth(ctx)
 				if err != nil {
 					continue
 				}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/shard"
 	"github.com/harshalvk/kairos/internal/tenant"
 	"github.com/redis/go-redis/v9"
 )
@@ -33,13 +34,41 @@ func dependentsKey(jobID string) string   { return dependentsKeyPrefix + jobID }
 
 // Queue wraps a Redis client to provide job enqueue/dequeue operations.
 type Queue struct {
-	rdb      *redis.Client
+	shards   []*redis.Client
+	router   *shard.Router
 	registry *tenant.Registry
+}
+
+// controlShard returns the Redis client used for operations that don't
+// belong to a single job type: dead-letter administration and the
+// dependency graph (waiting hash, dependents index). Both are
+// inherently cross-type — a dead-lettered job or a dependency edge
+// between two jobs of different types can't be usefully sharded by a
+// single job's type — so they live permanently on shards[0] rather
+// than being distributed. This trades away sharding's throughput
+// benefit for these specific, comparatively low-volume operations, in
+// exchange for a single, always-consistent place to look.
+func (q *Queue) controlShard() *redis.Client {
+	return q.shards[0]
 }
 
 // New creates a Queue backed by the given Redis client.
 func New(rdb *redis.Client, registry *tenant.Registry) *Queue {
-	return &Queue{rdb: rdb, registry: registry}
+	return NewSharded([]*redis.Client{rdb}, registry)
+}
+
+// NewSharded creates a Queue distributing job types across multiple
+// Redis clients via consistent hashing on job type
+func NewSharded(rdbs []*redis.Client, registry *tenant.Registry) *Queue {
+	return &Queue{
+		shards:   rdbs,
+		router:   shard.NewRouter(len(rdbs)),
+		registry: registry,
+	}
+}
+
+func (q *Queue) shardFor(jobType string) *redis.Client {
+	return q.shards[q.router.ShardFor(jobType)]
 }
 
 // Enqueue pushes a job onto the pending queue.
@@ -54,29 +83,44 @@ func (q *Queue) Enqueue(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("register tenant (enqueue still needs retry): %w", err)
 	}
 
-	return q.rdb.LPush(ctx, pendingKey(ctx, j.Priority), data).Err()
+	return q.shardFor(j.Type).LPush(ctx, pendingKey(ctx, j.Priority), data).Err()
 }
 
-// Dequeue blocks until a job is available, then returns it.
-// A timeout of 0 means block forever.
-func (q *Queue) Dequeue(ctx context.Context, timeout time.Duration) (*job.Job, error) {
-	keys := []string{
-		pendingKey(ctx, job.PriorityHigh),
-		pendingKey(ctx, job.PriorityDefault),
-		pendingKey(ctx, job.PriorityLow),
-	}
-	result, err := q.rdb.BRPop(ctx, timeout, keys...).Result()
-
-	if err != nil {
-		return nil, err
+// Dequeue blocks until a job of one of the given job types is
+// available, checking the shard(s) those types route to. A worker
+// only needs to know which shards are relevant to the handlers it has
+// actually registered.
+func (q *Queue) Dequeue(ctx context.Context, jobTypes []string, timeout time.Duration) (*job.Job, error) {
+	shardSet := make(map[int]bool)
+	for _, t := range jobTypes {
+		shardSet[q.router.ShardFor(t)] = true
 	}
 
-	var j job.Job
-	if err := json.Unmarshal([]byte(result[1]), &j); err != nil {
-		return nil, fmt.Errorf("unmarshal job: %w", err)
+	// BRPOP across all priority keys on all relevant shards would need
+	// multiple blocking calls (Redis BRPOP can't span separate client
+	// connections) — so poll each relevant shard's shortest-timeout
+	// BRPOP in sequence within the overall timeout budget. Simpler than
+	// it sounds: with 1-2 shards per worker (typical), this is a
+	// negligible latency cost.
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for shardIdx := range shardSet {
+			keys := []string{
+				pendingKey(ctx, job.PriorityHigh),
+				pendingKey(ctx, job.PriorityDefault),
+				pendingKey(ctx, job.PriorityLow),
+			}
+			result, err := q.shards[shardIdx].BRPop(ctx, 200*time.Millisecond, keys...).Result()
+			if err == nil {
+				var j job.Job
+				if err := json.Unmarshal([]byte(result[1]), &j); err != nil {
+					return nil, fmt.Errorf("unmarshal job: %w", err)
+				}
+				return &j, nil
+			}
+		}
 	}
-
-	return &j, nil
+	return nil, redis.Nil
 }
 
 // MoveToDeadLetter stores a permanently-failed job in the dead-letter list.
@@ -87,7 +131,7 @@ func (q *Queue) MoveToDeadLetter(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	return q.rdb.LPush(ctx, deadLetterKey(ctx), data).Err()
+	return q.controlShard().LPush(ctx, deadLetterKey(ctx), data).Err()
 }
 
 // ListDeadLetter returns up to limit dead-lettered jobs without removing
@@ -98,7 +142,7 @@ func (q *Queue) ListDeadLetter(ctx context.Context, limit int64) ([]*job.Job, er
 		stop = -1
 	}
 
-	raw, err := q.rdb.LRange(ctx, deadLetterKey(ctx), 0, stop).Result()
+	raw, err := q.controlShard().LRange(ctx, deadLetterKey(ctx), 0, stop).Result()
 
 	if err != nil {
 		return nil, fmt.Errorf("lrange dead letter: %w", err)
@@ -139,7 +183,7 @@ func (q *Queue) RequeueDeadLetter(ctx context.Context, jobID string) error {
 			return fmt.Errorf("marshal job for dead-letter removal: %w", err)
 		}
 
-		if err := q.rdb.LRem(ctx, deadLetterKey(ctx), 1, data).Err(); err != nil {
+		if err := q.shardFor(j.Type).LRem(ctx, deadLetterKey(ctx), 1, data).Err(); err != nil {
 			return fmt.Errorf("remove from dead letter: %w", err)
 		}
 
@@ -155,7 +199,7 @@ func (q *Queue) RequeueDeadLetter(ctx context.Context, jobID string) error {
 
 // PurgeDeadLetter deletes all dead-lettered jobs permanently.
 func (q *Queue) PurgeDeadLetter(ctx context.Context) error {
-	return q.rdb.Del(ctx, deadLetterKey(ctx)).Err()
+	return q.controlShard().Del(ctx, deadLetterKey(ctx)).Err()
 }
 
 // EnqueueDelayed schedules a job to become available at runAt, stored in a
@@ -167,7 +211,7 @@ func (q *Queue) EnqueueDelayed(ctx context.Context, j *job.Job, runAt time.Time)
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	return q.rdb.ZAdd(ctx, delayedKey(ctx), redis.Z{
+	return q.shardFor(j.Type).ZAdd(ctx, delayedKey(ctx), redis.Z{
 		Score:  float64(runAt.Unix()),
 		Member: data,
 	}).Err()
@@ -178,7 +222,7 @@ func (q *Queue) EnqueueDelayed(ctx context.Context, j *job.Job, runAt time.Time)
 // set. Returns how many jobs were promoted.
 func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 	now := float64(time.Now().Unix())
-	due, err := q.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
+	due, err := q.controlShard().ZRangeArgs(ctx, redis.ZRangeArgs{
 		Key:     delayedKey(ctx),
 		ByScore: true,
 		Start:   "-inf",
@@ -192,10 +236,10 @@ func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 		if err := json.Unmarshal([]byte(data), &j); err != nil {
 			return 0, fmt.Errorf("unmarshal promoted job: %w", err)
 		}
-		if err := q.rdb.LPush(ctx, pendingKey(ctx, j.Priority), data).Err(); err != nil {
+		if err := q.shardFor(j.Type).LPush(ctx, pendingKey(ctx, j.Priority), data).Err(); err != nil {
 			return 0, fmt.Errorf("push promoted job: %w", err)
 		}
-		if err := q.rdb.ZRem(ctx, delayedKey(ctx), data).Err(); err != nil {
+		if err := q.shardFor(j.Type).ZRem(ctx, delayedKey(ctx), data).Err(); err != nil {
 			return 0, fmt.Errorf("remove promoted job: %w", err)
 		}
 	}
@@ -204,14 +248,14 @@ func (q *Queue) PromoteDueJobs(ctx context.Context) (int, error) {
 
 // Depth returns the current number of pending jobs.
 func (q *Queue) Depth(ctx context.Context, p job.Priority) (int64, error) {
-	return q.rdb.LLen(ctx, pendingKey(ctx, p)).Result()
+	return q.controlShard().LLen(ctx, pendingKey(ctx, p)).Result()
 }
 
 // TotalDepth retuns the sum of pending jobs across all priority levels
 func (q *Queue) TotalDepth(ctx context.Context) (int64, error) {
 	var total int64
 	for _, key := range pendingKeys {
-		n, err := q.rdb.LLen(ctx, key).Result()
+		n, err := q.controlShard().LLen(ctx, key).Result()
 		if err != nil {
 			return 0, err
 		}
@@ -232,7 +276,7 @@ func (q *Queue) EnqueueWithDependencies(ctx context.Context, j *job.Job) error {
 		return fmt.Errorf("marshal job: %w", err)
 	}
 
-	pipe := q.rdb.TxPipeline()
+	pipe := q.shardFor(j.Type).TxPipeline()
 	pipe.HSet(ctx, waitingKey, j.ID, data)
 	pipe.Set(ctx, waitingCountKey(j.ID), len(j.DependsOn), 0)
 	for _, depID := range j.DependsOn {
@@ -249,13 +293,13 @@ func (q *Queue) EnqueueWithDependencies(ctx context.Context, j *job.Job) error {
 // it, and enqueues any that now have zero outstanding, dependencies
 func (q *Queue) ResolveDependents(ctx context.Context, completedJobID string) error {
 	depKey := dependentsKey(completedJobID)
-	depnedntIDs, err := q.rdb.SMembers(ctx, depKey).Result()
+	depnedntIDs, err := q.controlShard().SMembers(ctx, depKey).Result()
 	if err != nil {
 		return fmt.Errorf("get dependents of %s: %w", completedJobID, err)
 	}
 
 	for _, depJobID := range depnedntIDs {
-		remaining, err := q.rdb.Decr(ctx, waitingCountKey(depJobID)).Result()
+		remaining, err := q.controlShard().Decr(ctx, waitingCountKey(depJobID)).Result()
 		if err != nil {
 			return fmt.Errorf("decrement waiting count for %s: %w", depJobID, err)
 		}
@@ -263,7 +307,7 @@ func (q *Queue) ResolveDependents(ctx context.Context, completedJobID string) er
 			continue
 		}
 
-		data, err := q.rdb.HGet(ctx, waitingKey, depJobID).Result()
+		data, err := q.controlShard().HGet(ctx, waitingKey, depJobID).Result()
 		if err != nil {
 			if errors.Is(err, redis.Nil) {
 				continue // already promoted (e.g. by a concurrent resolve)
@@ -280,7 +324,7 @@ func (q *Queue) ResolveDependents(ctx context.Context, completedJobID string) er
 			return fmt.Errorf("enqueue ready job %s: %w", depJobID, err)
 		}
 
-		cleanup := q.rdb.TxPipeline()
+		cleanup := q.controlShard().TxPipeline()
 		cleanup.HDel(ctx, waitingKey, depJobID)
 		cleanup.Del(ctx, waitingCountKey(depJobID))
 		if _, err := cleanup.Exec(ctx); err != nil {
@@ -288,7 +332,7 @@ func (q *Queue) ResolveDependents(ctx context.Context, completedJobID string) er
 		}
 	}
 
-	return q.rdb.Del(ctx, depKey).Err()
+	return q.controlShard().Del(ctx, depKey).Err()
 }
 
 // CascadeFailDependents moves every job waiting on failedJobID - directly
@@ -302,13 +346,13 @@ func (q *Queue) CascadeFailDependents(ctx context.Context, failedJobID string) e
 		toVisit = toVisit[1:]
 
 		depKey := dependentsKey(id)
-		dependentIDs, err := q.rdb.SMembers(ctx, depKey).Result()
+		dependentIDs, err := q.controlShard().SMembers(ctx, depKey).Result()
 		if err != nil {
 			return fmt.Errorf("get dependents of %s: %w", id, err)
 		}
 
 		for _, depJobID := range dependentIDs {
-			data, err := q.rdb.HGet(ctx, waitingKey, depJobID).Result()
+			data, err := q.controlShard().HGet(ctx, waitingKey, depJobID).Result()
 			if err != nil {
 				if errors.Is(err, redis.Nil) {
 					continue
@@ -327,7 +371,7 @@ func (q *Queue) CascadeFailDependents(ctx context.Context, failedJobID string) e
 				return fmt.Errorf("move %s to dead letter: %w", depJobID, err)
 			}
 
-			cleanup := q.rdb.TxPipeline()
+			cleanup := q.controlShard().TxPipeline()
 			cleanup.HDel(ctx, waitingKey, depJobID)
 			cleanup.Del(ctx, waitingCountKey(depJobID))
 			if _, err := cleanup.Exec(ctx); err != nil {
@@ -337,7 +381,7 @@ func (q *Queue) CascadeFailDependents(ctx context.Context, failedJobID string) e
 			toVisit = append(toVisit, depJobID) // cascade further down the chain
 		}
 
-		if err := q.rdb.Del(ctx, depKey).Err(); err != nil {
+		if err := q.controlShard().Del(ctx, depKey).Err(); err != nil {
 			return fmt.Errorf("cleanup dependencies key for %s: %w", id, err)
 		}
 	}
@@ -368,7 +412,7 @@ func (q *Queue) EnqueueIdempotent(ctx context.Context, j *job.Job, ttl time.Dura
 	// atomic "claim" opertion - two concurrent producers reacing to
 	// enqueue the same idempotency key will have exactly one SETNX
 	// succeed, so there's no window for both to slip through
-	acquired, err := q.rdb.SetNX(ctx, redisKey, j.ID, ttl).Result()
+	acquired, err := q.shardFor(j.Type).SetNX(ctx, redisKey, j.ID, ttl).Result()
 	if err != nil {
 		return false, fmt.Errorf("idempotency check: %w", err)
 	}
@@ -379,7 +423,7 @@ func (q *Queue) EnqueueIdempotent(ctx context.Context, j *job.Job, ttl time.Dura
 	if err := q.Enqueue(ctx, j); err != nil {
 		// Enqueue failed after we clamied the key - release the claim so a
 		// legitimate retry isn't permanently blocked by our own failure
-		if delErr := q.rdb.Del(ctx, redisKey).Err(); delErr != nil {
+		if delErr := q.shardFor(j.Type).Del(ctx, redisKey).Err(); delErr != nil {
 			return false, fmt.Errorf("enqueue failed (%v), and failed to release idempotency claim: %w", err, delErr)
 		}
 		return false, fmt.Errorf("enqueue after idempotency claim: %w", err)
@@ -417,7 +461,7 @@ func (q *Queue) EnqueueBatch(ctx context.Context, jobs []*job.Job) error {
 		return nil
 	}
 
-	pipe := q.rdb.Pipeline()
+	pipe := q.controlShard().Pipeline()
 	for _, j := range jobs {
 		data, err := json.Marshal(j)
 		if err != nil {

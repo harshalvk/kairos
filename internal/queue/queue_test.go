@@ -50,7 +50,7 @@ func TestEnqueueDequeue(t *testing.T) {
 
 	require.NoError(t, q.Enqueue(ctx, j))
 
-	got, err := q.Dequeue(ctx, 2*time.Second)
+	got, err := q.Dequeue(ctx, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
 
 	assert.Equal(t, j.ID, got.ID)
@@ -64,7 +64,7 @@ func TestDequeue_TimesOutWhenEmpty(t *testing.T) {
 	q := queue.New(rdb, registry)
 	ctx := context.Background()
 
-	_, err := q.Dequeue(ctx, 1*time.Second)
+	_, err := q.Dequeue(ctx, []string{"send_email"}, 1*time.Second)
 	assert.ErrorIs(t, err, redis.Nil)
 }
 
@@ -94,7 +94,7 @@ func TestDeadLetter_MoveListRequeue(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, jobs)
 
-	got, err := q.Dequeue(ctx, 2*time.Second)
+	got, err := q.Dequeue(ctx, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, j.ID, got.ID)
 	assert.Equal(t, 0, got.Attempts) // confirms attempts was reset on requeue
@@ -120,12 +120,12 @@ func TestDelayedJobs_PromoteDueJobs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, promoted)
 
-	got, err := q.Dequeue(ctx, 2*time.Second)
+	got, err := q.Dequeue(ctx, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, dueJob.ID, got.ID)
 
 	// future job should still not be in pending
-	_, err = q.Dequeue(ctx, 1*time.Second)
+	_, err = q.Dequeue(ctx, []string{"send_email"}, 1*time.Second)
 	assert.ErrorIs(t, err, redis.Nil)
 }
 
@@ -145,7 +145,7 @@ func TestDequeue_PrioritizesHighOverDefault(t *testing.T) {
 	require.NoError(t, q.Enqueue(ctx, lowJob))
 	require.NoError(t, q.Enqueue(ctx, highJob))
 
-	got, err := q.Dequeue(ctx, 2*time.Second)
+	got, err := q.Dequeue(ctx, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, highJob.ID, got.ID)
 }
@@ -165,12 +165,12 @@ func TestDependencies_ResolveOnCompletion(t *testing.T) {
 	require.NoError(t, q.EnqueueWithDependencies(ctx, downstream))
 
 	// downstream should NOT be runnable yet - nothing in pending
-	_, err = q.Dequeue(ctx, 1*time.Second)
+	_, err = q.Dequeue(ctx, []string{"send_email"}, 1*time.Second)
 	assert.ErrorIs(t, err, redis.Nil)
 
 	require.NoError(t, q.ResolveDependents(ctx, upstream.ID))
 
-	got, err := q.Dequeue(ctx, 2*time.Second)
+	got, err := q.Dequeue(ctx, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, downstream.ID, got.ID)
 }
@@ -218,11 +218,11 @@ func TestEnqueueIdempotent_SkipsDuplicateKey(t *testing.T) {
 	assert.False(t, enqueued2) // duplicate, should be skipped
 
 	// only one job should actually be in the pending queue
-	got, err := q.Dequeue(ctx, 1*time.Second)
+	got, err := q.Dequeue(ctx, []string{"send_email"}, 1*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, got.ID)
 
-	_, err = q.Dequeue(ctx, 1*time.Second)
+	_, err = q.Dequeue(ctx, []string{"send_email"}, 1*time.Second)
 	assert.ErrorIs(t, err, redis.Nil) // second one never made it in
 }
 
@@ -300,11 +300,11 @@ func TestTenantIsolation_JobsDoNotCrossTenants(t *testing.T) {
 	require.NoError(t, q.Enqueue(ctxA, j))
 
 	// tenant-b's queue must be empty even though tenant-a just enqueued.
-	_, err = q.Dequeue(ctxB, 1*time.Second)
+	_, err = q.Dequeue(ctxB, []string{"send_email"}, 1*time.Second)
 	assert.ErrorIs(t, err, redis.Nil)
 
 	// tenant-a can still dequeue its own job.
-	got, err := q.Dequeue(ctxA, 2*time.Second)
+	got, err := q.Dequeue(ctxA, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, j.ID, got.ID)
 }

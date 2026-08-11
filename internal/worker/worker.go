@@ -96,8 +96,12 @@ func (wp *Pool) Start(ctx context.Context, shutdownTimeout time.Duration) {
 
 func (wp *Pool) runWorker(ctx context.Context, id int, wg *sync.WaitGroup) {
 	defer wg.Done()
+	jobTypes := make([]string, 0, len(wp.handlers))
 	ctx = tenant.WithContext(ctx, wp.tenantID)
 	logger := logging.FromContext(ctx).With(slog.Int("worker_id", id))
+	for t := range wp.handlers {
+		jobTypes = append(jobTypes, t)
+	}
 
 	for {
 		select {
@@ -107,7 +111,7 @@ func (wp *Pool) runWorker(ctx context.Context, id int, wg *sync.WaitGroup) {
 		default:
 		}
 
-		job, err := wp.queue.Dequeue(ctx, 5*time.Second)
+		job, err := wp.queue.Dequeue(ctx, jobTypes, 5*time.Second)
 		if err != nil {
 			continue
 		}
