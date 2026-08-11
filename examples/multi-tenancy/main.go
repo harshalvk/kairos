@@ -36,11 +36,11 @@ func main() {
 	fmt.Println("enqueued for acme-corp:", acmeJob.ID)
 
 	// globex-inc's queue is untouched — it never sees acme's job.
-	_, err = q.Dequeue(ctxGlobex, 1*time.Second)
+	_, err = q.Dequeue(ctxGlobex, []string{"send_email"}, 1*time.Second)
 	fmt.Println("globex-inc queue empty:", err != nil)
 
 	// acme-corp can dequeue its own job normally.
-	got, err := q.Dequeue(ctxAcme, 2*time.Second)
+	got, err := q.Dequeue(ctxAcme, []string{"send_email"}, 2*time.Second)
 	if err != nil {
 		panic(err)
 	}

@@ -41,7 +41,7 @@ func main() {
 
 	fmt.Println("\ndequeue order:")
 	for i := 0; i < 3; i++ {
-		got, err := q.Dequeue(ctx, 2*time.Second)
+		got, err := q.Dequeue(ctx, []string{"cleanup", "report", "password_reset"}, 2*time.Second)
 		if err != nil {
 			panic(err)
 		}

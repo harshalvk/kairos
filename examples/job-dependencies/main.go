@@ -39,7 +39,7 @@ func main() {
 	fmt.Println("enqueued downstream (waiting on upstream):", downstream.ID)
 
 	// Confirm downstream is NOT runnable yet.
-	_, deqErr := q.Dequeue(ctx, 1*time.Second)
+	_, deqErr := q.Dequeue(ctx, []string{"notify_user"}, 1*time.Second)
 	fmt.Println("pending queue before resolution: empty =", deqErr != nil)
 
 	// Simulate upstream completing.
@@ -48,7 +48,7 @@ func main() {
 	}
 	fmt.Println("upstream resolved, downstream should now be runnable")
 
-	got, err := q.Dequeue(ctx, 2*time.Second)
+	got, err := q.Dequeue(ctx, []string{"notify_user"}, 2*time.Second)
 	if err != nil {
 		panic(err)
 	}
