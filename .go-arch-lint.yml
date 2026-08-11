@@ -58,6 +58,8 @@ components:
     in: pkg/kairos
   webhook:
     in: internal/webhook
+  shard:
+    in: internal/shard
 
 deps:
   webhook:
@@ -82,11 +84,14 @@ deps:
     anyVendorDeps: true
   config:
     anyVendorDeps: true
+  shard:
+    anyVendorDeps: true
   queue:
     anyVendorDeps: true
     mayDependOn:
       - job
       - tenant
+      - shard
   store:
     anyVendorDeps: true
     mayDependOn:
