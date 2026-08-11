@@ -29,7 +29,7 @@ func (r *Router) ShardFor(jobType string) int {
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(jobType)) // hash.Hash.Write never returns an error
-	return int(h.Sum32() % uint32(r.shardCount))
+	return int(h.Sum32() % uint32(r.shardCount)) // #nosec G115 -- shardCount is validated to fit within uint32
 }
 
 // ShardCount returns the total number of shards
