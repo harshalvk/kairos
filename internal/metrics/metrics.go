@@ -41,6 +41,15 @@ var (
 		},
 		[]string{"type"},
 	)
+
+	// internal/metrics/metrics.go
+	PoisonPillsDetected = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "kairos_poison_pills_detected_total",
+			Help: "Total number of jobs dead-lettered due to repeated unexplained worker disappearance.",
+		},
+		[]string{"type"},
+	)
 )
 
 func init() {

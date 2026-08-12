@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -24,6 +25,32 @@ import (
 
 // Handler processes a single job. Returning an error means the job failed.
 type Handler func(ctx context.Context, j *job.Job) error
+
+const claimKeyPrefix = "kairos:claim:"
+
+func claimKey(jobID string) string {
+	return claimKeyPrefix + jobID
+}
+
+// claim records that this worker is actively processing j, with a TTL
+// slightly longer than a reasonable max handler duration. If the
+// worker crashes hard enough to never clear this, the claim simply
+// expires — but its *existence at claim time* is what lets us detect
+// a job that's been claimed and lost repeatedly.
+func (wp *Pool) claim(ctx context.Context, j *job.Job) (poisonCount int64, err error) {
+	key := claimKey(j.ID)
+	count, err := wp.queue.IncrClaimCount(ctx, key, 10*time.Minute)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (wp *Pool) clearClaim(ctx context.Context, j *job.Job) {
+	if err := wp.queue.ClearClaim(ctx, claimKey(j.ID)); err != nil {
+		logging.FromContext(ctx).Warn("failed to clear claim", slog.String("job_id", j.ID), slog.Any("error", err))
+	}
+}
 
 // Pool pulls jobs from a Queue and dispatches them to registered
 // Handlers, with a fixed number of concurrent workers.
@@ -130,7 +157,7 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	)
 
 	logger := logging.FromContext(ctx).With(
-		slog.Int("workder_id", workerID),
+		slog.Int("worker_id", workerID),
 		slog.String("job_id", j.ID),
 		slog.String("job_type", j.Type),
 		slog.Int("attempt", j.Attempts+1),
@@ -145,9 +172,6 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	}
 
 	if !wp.breaker.Allow(j.Type) {
-		// circuit is open - this dependency is known to be failing
-		// schedule a retry (same backoff mechanism as a normal failure)
-		// rather than attempting a call we already expect to fail
 		span.AddEvent("circuit_open_deferred")
 		logger.Info("circuit open for job type, deferring job")
 		wp.scheduleRetry(ctx, j)
@@ -155,13 +179,28 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	}
 
 	if err := wp.limiter.Wait(ctx, j.Type); err != nil {
-		// ctx was cancled while watiting for a rate limit token - likely
-		// shutdown in progress. re-queue the job rather than dropping it
 		span.RecordError(err)
-		logger.Warn("rate limit wait canclled, re-enqueuing", slog.Any("error", err))
+		logger.Warn("rate limit wait cancelled, re-enqueuing", slog.Any("error", err))
 		if reErr := wp.queue.Enqueue(ctx, j); reErr != nil {
-			logger.Error("failed to re-enqueue after canclled rate-limit wait", slog.Any("error", reErr))
+			logger.Error("failed to re-enqueue after cancelled rate-limit wait", slog.Any("error", reErr))
 		}
+		return
+	}
+
+	// Claim BEFORE invoking the handler — if the process crashes hard
+	// during handler execution, everything after this point never runs,
+	// so this claim is the only record a future worker has that this
+	// job was attempted and disappeared without reporting an outcome.
+	poisonCount, claimErr := wp.claim(ctx, j)
+	if claimErr != nil {
+		logger.Warn("failed to record claim", slog.Any("error", claimErr))
+	} else if poisonCount >= 3 {
+		// Already claimed 3+ times without a clean outcome — do NOT
+		// invoke the handler again and risk crashing a 4th worker.
+		logger.Error("job claimed repeatedly without clean outcome, treating as poison pill", slog.Int64("claim_count", poisonCount))
+		j.LastError = fmt.Sprintf("poison pill: claimed %d times without a clean outcome", poisonCount)
+		wp.moveToDeadLetter(ctx, j)
+		wp.clearClaim(ctx, j)
 		return
 	}
 
@@ -176,12 +215,13 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	metrics.JobDuration.WithLabelValues(j.Type).Observe(duration.Seconds())
 
 	if handlerErr == nil {
+		wp.clearClaim(ctx, j)
 		wp.breaker.RecordSuccess(j.Type)
 		metrics.CircuitState.WithLabelValues(j.Type).Set(float64(wp.breaker.StateOf(j.Type)))
 		j.Status = job.StatusCompleted
 		metrics.JobsProcessed.WithLabelValues(j.Type, "completed").Inc()
 		if err := wp.store.RecordStatus(ctx, j); err != nil {
-			logger.Error("failed to recrod completed status", slog.Any("error", err))
+			logger.Error("failed to record completed status", slog.Any("error", err))
 		}
 		if err := wp.queue.ResolveDependents(ctx, j.ID); err != nil {
 			logger.Error("failed to resolve dependents", slog.Any("error", err))
@@ -204,16 +244,18 @@ func (wp *Pool) process(ctx context.Context, workerID int, j *job.Job) {
 	j.LastError = handlerErr.Error()
 	j.Status = job.StatusFailed
 	metrics.JobsProcessed.WithLabelValues(j.Type, "failed").Inc()
-	if recError := wp.store.RecordCreated(ctx, j); recError != nil {
-		logger.Error("failed to record failed status", slog.Duration("duration", duration))
+	if recErr := wp.store.RecordStatus(ctx, j); recErr != nil {
+		logger.Error("failed to record failed status", slog.Any("error", recErr), slog.Duration("duration", duration))
 	}
 	logger.Warn("job failed", slog.Any("error", handlerErr), slog.Duration("duration", duration))
 
 	if j.Attempts >= j.MaxAttempts {
 		wp.moveToDeadLetter(ctx, j)
+		wp.clearClaim(ctx, j)
 		return
 	}
 
+	wp.clearClaim(ctx, j)
 	wp.scheduleRetry(ctx, j)
 }
 
