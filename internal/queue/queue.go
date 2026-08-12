@@ -479,3 +479,24 @@ func (q *Queue) EnqueueBatch(ctx context.Context, jobs []*job.Job) error {
 	}
 	return nil
 }
+
+// IncrClaimCount increments a claim counter for key with a TTL,
+// returning the new count. Used to detect a job that's been claimed
+// (started processing) repeatedly without ever reporting a clean
+// outcome — a signal of a poison pill crashing its workers.
+func (q *Queue) IncrClaimCount(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	pipe := q.shards[0].Pipeline() // claim tracking is small, unsharded metadata — shard 0 is fine
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("incr claim count: %w", err)
+	}
+	return incr.Val(), nil
+}
+
+// ClearClaim removes a claim counter, called when a job reaches any
+// clean outcome (success, normal failure, dead-letter) — i.e. the
+// worker survived long enough to report what happened.
+func (q *Queue) ClearClaim(ctx context.Context, key string) error {
+	return q.shards[0].Del(ctx, key).Err()
+}

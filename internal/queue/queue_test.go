@@ -336,3 +336,24 @@ func TestEnqueueBatch_EmptySliceIsNoop(t *testing.T) {
 	q := queue.New(rdb, registry)
 	assert.NoError(t, q.EnqueueBatch(context.Background(), nil))
 }
+
+func TestClaimCount_IncrementsAndExpires(t *testing.T) {
+	rdb := setupRedis(t)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry)
+	ctx := context.Background()
+
+	count1, err := q.IncrClaimCount(ctx, "test-claim", 100*time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count1)
+
+	count2, err := q.IncrClaimCount(ctx, "test-claim", 100*time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count2)
+
+	require.NoError(t, q.ClearClaim(ctx, "test-claim"))
+
+	count3, err := q.IncrClaimCount(ctx, "test-claim", 100*time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count3, "count should reset after ClearClaim")
+}
