@@ -1,7 +1,3 @@
-// Package chaos contains tests that deliberately kill infrastructure
-// mid-run to verify Kairos's failure-recovery claims (durable retries,
-// leader election failover, crash-safe delayed jobs) actually hold —
-// not just that the code compiles and looks right.
 package chaos
 
 import (
@@ -10,19 +6,58 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
 	"github.com/harshalvk/kairos/internal/job"
 	"github.com/harshalvk/kairos/internal/queue"
 	"github.com/harshalvk/kairos/internal/tenant"
 )
 
+// reconnectAfterRestart re-resolves the container's connection string
+// and returns a fresh client. Necessary on Docker Desktop for Windows,
+// where container.Restart() does not reliably preserve the host-side
+// port-forwarding proxy for the original client's address — the
+// container comes back up on a port the original client never learns
+// about, so it retries a now-dead port forever rather than actually
+// being slow to recover.
+func reconnectAfterRestart(ctx context.Context, t *testing.T, container *tcredis.RedisContainer) *redis.Client {
+	t.Helper()
+
+	var newRdb *redis.Client
+	require.Eventually(t, func() bool {
+		connStr, err := container.ConnectionString(ctx)
+		if err != nil {
+			return false
+		}
+		opts, err := redis.ParseURL(connStr)
+		if err != nil {
+			return false
+		}
+		candidate := redis.NewClient(opts)
+		if pingErr := candidate.Ping(ctx).Err(); pingErr != nil {
+			if closeErr := candidate.Close(); closeErr != nil {
+				t.Logf("failed to close probe client: %v", closeErr)
+			}
+			return false
+		}
+		newRdb = candidate
+		return true
+	}, 30*time.Second, 500*time.Millisecond, "redis did not become reachable via a freshly-resolved connection string after restart")
+
+	t.Cleanup(func() {
+		if closeErr := newRdb.Close(); closeErr != nil {
+			t.Logf("failed to close reconnected redis client: %v", closeErr)
+		}
+	})
+	return newRdb
+}
+
 // TestChaos_DelayedJobSurvivesRedisRestart verifies the claim in ADR
 // 0003: delayed/retry jobs are durable Redis state (a sorted set), not
-// an in-memory timer, so they survive the Redis process restarting —
-// e.g. an OOM-kill-and-recover or a rolling upgrade — not just a
-// worker process restarting.
+// an in-memory timer, so they survive the Redis process restarting.
 func TestChaos_DelayedJobSurvivesRedisRestart(t *testing.T) {
 	ctx := context.Background()
 	rdb, container := setupRedis(t)
@@ -33,21 +68,13 @@ func TestChaos_DelayedJobSurvivesRedisRestart(t *testing.T) {
 	require.NoError(t, err)
 	j := job.New("send_email", payload, 3)
 
-	// Schedule a job due in the past, so it's immediately promotable
-	// once Redis is back.
 	require.NoError(t, q.EnqueueDelayed(ctx, j, time.Now().Add(-1*time.Second)))
 
-	// Simulate Redis's process restarting mid-flight. go-redis's client
-	// is pooled and reconnects lazily on the next command against the
-	// same address — no need to construct a fresh client, which is
-	// itself part of what this test is verifying (the client and the
-	// durable server-side state both recover without extra plumbing).
 	require.NoError(t, container.Stop(ctx, nil))
 	require.NoError(t, container.Start(ctx))
 
-	require.Eventually(t, func() bool {
-		return rdb.Ping(ctx).Err() == nil
-	}, 15*time.Second, 200*time.Millisecond, "redis did not become reachable after restart")
+	newRdb := reconnectAfterRestart(ctx, t, container)
+	q = queue.New(newRdb, registry) // durable state lives in Redis itself, not the client — a fresh client against the same data proves that
 
 	promoted, err := q.PromoteDueJobs(ctx)
 	require.NoError(t, err)
@@ -59,9 +86,7 @@ func TestChaos_DelayedJobSurvivesRedisRestart(t *testing.T) {
 }
 
 // TestChaos_PendingJobSurvivesRedisRestart is the same verification for
-// a plain pending-queue job (not delayed) — confirming basic Enqueue
-// state also survives a Redis process restart, as a baseline alongside
-// the delayed-job case above.
+// a plain pending-queue job (not delayed).
 func TestChaos_PendingJobSurvivesRedisRestart(t *testing.T) {
 	ctx := context.Background()
 	rdb, container := setupRedis(t)
@@ -77,9 +102,8 @@ func TestChaos_PendingJobSurvivesRedisRestart(t *testing.T) {
 	require.NoError(t, container.Stop(ctx, nil))
 	require.NoError(t, container.Start(ctx))
 
-	require.Eventually(t, func() bool {
-		return rdb.Ping(ctx).Err() == nil
-	}, 15*time.Second, 200*time.Millisecond, "redis did not become reachable after restart")
+	newRdb := reconnectAfterRestart(ctx, t, container)
+	q = queue.New(newRdb, registry)
 
 	got, err := q.Dequeue(ctx, []string{"send_email"}, 2*time.Second)
 	require.NoError(t, err)
