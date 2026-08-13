@@ -56,6 +56,8 @@ func main() {
 	defer acquireTicker.Stop()
 	promoteTicker := time.NewTicker(promoteInterval)
 	defer promoteTicker.Stop()
+	drainTicker := time.NewTicker(10 * time.Second)
+	defer drainTicker.Stop()
 
 	logger.Info("scheduler started, attempting to acquire leadership")
 
@@ -91,6 +93,26 @@ func main() {
 				}
 				if n > 0 {
 					logger.Info("promoted due jobs", slog.String("tenant_id", t), slog.Int("count", n))
+				}
+			}
+		case <-drainTicker.C:
+			if !elector.IsLeader() {
+				continue
+			}
+			tenants, err := registry.List(ctx)
+			if err != nil {
+				logger.Error("failed to list tenants for overflow drain", slog.Any("error", err))
+				continue
+			}
+			for _, t := range tenants {
+				tenantCtx := tenant.WithContext(ctx, t)
+				moved, err := q.DrainOverflow(tenantCtx, 50)
+				if err != nil {
+					logger.Error("drain overflow failed", slog.String("tenant_id", t), slog.Any("error", err))
+					continue
+				}
+				if moved > 0 {
+					logger.Info("drained overflow", slog.String("tenant_id", t), slog.Int("count", moved))
 				}
 			}
 		}

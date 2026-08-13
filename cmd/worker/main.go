@@ -179,10 +179,14 @@ func main() {
 				return
 			case <-ticker.C:
 				depth, err := q.TotalDepth(ctx)
-				if err != nil {
-					continue
+				if err == nil {
+					metrics.QueueDepth.Set(float64(depth))
 				}
-				metrics.QueueDepth.Set(float64(depth))
+
+				overflow, err := q.OverflowDepth(ctx)
+				if err == nil {
+					metrics.OverflowDepth.WithLabelValues(cfg.TenantID).Set(float64(overflow))
+				}
 			}
 		}
 	}()

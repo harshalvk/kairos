@@ -53,6 +53,17 @@
           "legendFormat": "{{type}}"
         }
       ]
+    },
+    {
+      "title": "Overflow Queue Depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "kairos_overflow_depth",
+          "legendFormat": "{{tenant_id}}"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,

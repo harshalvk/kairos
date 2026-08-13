@@ -50,8 +50,16 @@ var (
 		},
 		[]string{"type"},
 	)
+
+	OverflowDepth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "kairos_overflow_depth",
+			Help: "Current number of jobs sitting in the backpressure overflow queue.",
+		},
+		[]string{"tenant_id"},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(JobsProcessed, JobDuration, QueueDepth, CircuitState)
+	prometheus.MustRegister(JobsProcessed, JobDuration, QueueDepth, CircuitState, PoisonPillsDetected, OverflowDepth)
 }
