@@ -357,3 +357,52 @@ func TestClaimCount_IncrementsAndExpires(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count3, "count should reset after ClearClaim")
 }
+
+func TestBackpressure_RejectPolicy(t *testing.T) {
+	rdb := setupRedis(t)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry).WithBackpressure(queue.BackpressureConfig{
+		MaxDepth: map[job.Priority]int64{job.PriorityDefault: 2},
+		Policy:   queue.PolicyReject,
+	})
+	ctx := context.Background()
+	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
+	require.NoError(t, err)
+
+	require.NoError(t, q.Enqueue(ctx, job.New("send_email", payload, 3)))
+	require.NoError(t, q.Enqueue(ctx, job.New("send_email", payload, 3)))
+
+	err = q.Enqueue(ctx, job.New("send_email", payload, 3))
+	assert.ErrorIs(t, err, queue.ErrQueueFull)
+}
+
+func TestBackpressure_OverflowPolicyThenDrain(t *testing.T) {
+	rdb := setupRedis(t)
+	registry := tenant.NewRegistry(rdb)
+	q := queue.New(rdb, registry).WithBackpressure(queue.BackpressureConfig{
+		MaxDepth: map[job.Priority]int64{job.PriorityDefault: 1},
+		Policy:   queue.PolicyOverflow,
+	})
+	ctx := context.Background()
+	payload, err := json.Marshal(map[string]string{"to": "test@example.com"})
+	require.NoError(t, err)
+
+	require.NoError(t, q.Enqueue(ctx, job.New("send_email", payload, 3)))
+	require.NoError(t, q.Enqueue(ctx, job.New("send_email", payload, 3))) // over max -> overflow
+
+	overflowDepth, err := q.OverflowDepth(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), overflowDepth)
+
+	// drain the pending queue below max first
+	_, err = q.Dequeue(ctx, []string{"send_email"}, 1*time.Second)
+	require.NoError(t, err)
+
+	moved, err := q.DrainOverflow(ctx, 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, moved)
+
+	overflowDepth, err = q.OverflowDepth(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), overflowDepth)
+}

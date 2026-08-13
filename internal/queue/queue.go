@@ -15,6 +15,29 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// BackpressurePolicy determines what happens when a priority queue's
+// depth meets or exceeds its configured max
+type BackpressurePolicy int
+
+const (
+	// PolicyReject fails Enqueue outright with ErrQueueFull
+	PolicyReject BackpressurePolicy = iota
+	// PolicyOverflow routes the job to a separate overflow list instead
+	// of failing - the caller can drain/inspect it separately, rather
+	// than losing the enqueue attempt entirely
+	PolicyOverflow
+)
+
+// ErrQueueFull is returned by Enqueue when PolicyReject is active and
+// the target priority queue is at or above its configured max depth
+var ErrQueueFull = errors.New("kairos: queue at max depth")
+
+// BackpressureConfig configures max-depth enforcement per priority
+type BackpressureConfig struct {
+	MaxDepth map[job.Priority]int64
+	Policy   BackpressurePolicy
+}
+
 const (
 	waitingKey            = "kairos:waiting"
 	waitingCountKeyPrefix = "kairos:waiting:count:"
@@ -34,9 +57,10 @@ func dependentsKey(jobID string) string   { return dependentsKeyPrefix + jobID }
 
 // Queue wraps a Redis client to provide job enqueue/dequeue operations.
 type Queue struct {
-	shards   []*redis.Client
-	router   *shard.Router
-	registry *tenant.Registry
+	shards       []*redis.Client
+	router       *shard.Router
+	registry     *tenant.Registry
+	backpressure BackpressureConfig
 }
 
 // controlShard returns the Redis client used for operations that don't
@@ -71,8 +95,31 @@ func (q *Queue) shardFor(jobType string) *redis.Client {
 	return q.shards[q.router.ShardFor(jobType)]
 }
 
+// WithBackpressure configures max-depth enforecement on an existing queue
+// call after New/NewSharded; a zero-value BackpressueConfig
+// (the default) means unlimited depth, preserving prior behavior
+func (q *Queue) WithBackpressure(cfg BackpressureConfig) *Queue {
+	q.backpressure = cfg
+	return q
+}
+
 // Enqueue pushes a job onto the pending queue.
 func (q *Queue) Enqueue(ctx context.Context, j *job.Job) error {
+	if maxDepth, ok := q.backpressure.MaxDepth[j.Priority]; ok && maxDepth > 0 {
+		depth, err := q.Depth(ctx, j.Priority)
+		if err != nil {
+			return fmt.Errorf("check depth for backpressure: %w", err)
+		}
+		if depth >= maxDepth {
+			switch q.backpressure.Policy {
+			case PolicyOverflow:
+				return q.enqueueOverflow(ctx, j)
+			default:
+				return ErrQueueFull
+			}
+		}
+	}
+
 	data, err := json.Marshal(j)
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)
@@ -84,6 +131,52 @@ func (q *Queue) Enqueue(ctx context.Context, j *job.Job) error {
 	}
 
 	return q.shardFor(j.Type).LPush(ctx, pendingKey(ctx, j.Priority), data).Err()
+}
+
+func overflowKey(ctx context.Context) string {
+	return fmt.Sprintf("kairos:%s:overflow", tenant.FromContext(ctx))
+}
+
+func (q *Queue) enqueueOverflow(ctx context.Context, j *job.Job) error {
+	data, err := json.Marshal(j)
+	if err != nil {
+		return fmt.Errorf("marshal overflow job: %w", err)
+	}
+	return q.shardFor(j.Type).LPush(ctx, overflowKey(ctx), data).Err()
+}
+
+// DrainOverflow moves up to limit jobs from the overflow queue back
+// into their normal pending queue - intended to be called once
+// pending depth has dropped back under the configured max, e.g. by a
+// periodic sweep in cmd/scheduler
+func (q *Queue) DrainOverflow(ctx context.Context, limit int64) (int, error) {
+	moved := 0
+	for i := int64(0); i < limit; i++ {
+		result, err := q.shards[0].RPop(ctx, overflowKey(ctx)).Result()
+		if errors.Is(err, redis.Nil) {
+			break
+		}
+		if err != nil {
+			return moved, fmt.Errorf("rpop overflow: %w", err)
+		}
+		var j job.Job
+		if err := json.Unmarshal([]byte(result), &j); err != nil {
+			return moved, fmt.Errorf("unmarshal overflow job: %w", err)
+		}
+		if err := q.Enqueue(ctx, &j); err != nil {
+			if pushErr := q.shards[0].LPush(ctx, overflowKey(ctx), result).Err(); pushErr != nil {
+				return moved, fmt.Errorf("failed to restore job to overflow after drain enqueue failure: %w", pushErr)
+			}
+			break
+		}
+		moved++
+	}
+	return moved, nil
+}
+
+// OverflowDepth returns how many jobs are currently sitting in overflow
+func (q *Queue) OverflowDepth(ctx context.Context) (int64, error) {
+	return q.shards[0].LLen(ctx, overflowKey(ctx)).Result()
 }
 
 // Dequeue blocks until a job of one of the given job types is
