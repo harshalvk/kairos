@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/harshalvk/kairos/internal/job"
+	"github.com/harshalvk/kairos/internal/queue"
 )
 
 type config struct {
@@ -16,6 +17,7 @@ type config struct {
 	circuitThreshold int
 	circuitCooldown  time.Duration
 	logger           *slog.Logger
+	backpressure     *queue.BackpressureConfig
 }
 
 func defaultConfig() config {

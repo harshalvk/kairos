@@ -89,6 +89,10 @@ func New(opts ...Option) (*Kairos, error) {
 		s = store.NewStore(db)
 	}
 
+	if cfg.backpressure != nil {
+		q = q.WithBackpressure(*cfg.backpressure)
+	}
+
 	limiter := ratelimit.New()
 	breaker := circuitbreaker.New(cfg.circuitThreshold, cfg.circuitCooldown)
 	dispatcher := webhook.New(rdb, logger)
@@ -230,4 +234,12 @@ func (k *Kairos) EnqueueBatch(ctx context.Context, jobType string, payloads []an
 		return nil, fmt.Errorf("kairos: enqueue batch: %w", err)
 	}
 	return ids, nil
+}
+
+// WithBackpressure configures per-priority max queue depth enforcement,
+// with a choice of policy: queue.PolicyReject fails Enqueue once a
+// priority level hits its max, queue.PolicyOverflow routes excess jobs
+// to a separate overflow list instead.
+func WithBackpressure(maxDepth map[ijob.Priority]int64, policy queue.BackpressurePolicy) Option {
+	return func(c *config) { c.backpressure = &queue.BackpressureConfig{MaxDepth: maxDepth, Policy: policy} }
 }
