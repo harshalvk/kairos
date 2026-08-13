@@ -1,0 +1,18 @@
+name: Chaos
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 6 * * *" # daily at 6am UTC
+
+jobs:
+  chaos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Run chaos tests
+        run: go test -race -v -timeout 5m ./chaos/...
