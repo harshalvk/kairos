@@ -60,6 +60,8 @@ components:
     in: internal/webhook
   shard:
     in: internal/shard
+  benchreport:
+    in: internal/benchreport
 
 deps:
   webhook:
@@ -140,6 +142,8 @@ deps:
     anyVendorDeps: true
     mayDependOn:
       - kairospb
+  benchreport:
+    anyVendorDeps: true
   kairos:
     anyVendorDeps: true
     mayDependOn:
@@ -174,6 +178,7 @@ deps:
       - kairosclient
       - config
       - webhook
+      - benchreport
   examples:
     anyVendorDeps: true
     mayDependOn:
