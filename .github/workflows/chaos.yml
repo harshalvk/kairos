@@ -16,3 +16,17 @@ jobs:
           cache: true
       - name: Run chaos tests
         run: go test -race -v -timeout 5m ./chaos/...
+  benchmark:
+    runs-on: ubuntu-latest
+    services:
+      pushgateway:
+        image: prom/pushgateway
+        ports: ["9091:9091"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Run and push benchmarks
+        run: go run ./cmd/benchpush -gateway http://localhost:9091 -pkgs ./internal/...

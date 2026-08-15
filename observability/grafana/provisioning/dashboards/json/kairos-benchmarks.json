@@ -1,0 +1,30 @@
+{
+  "title": "Kairos Benchmarks",
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "ns/op over time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "kairos_bench_ns_per_op",
+          "legendFormat": "{{benchmark}}"
+        }
+      ]
+    },
+    {
+      "title": "Allocations per op over time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "kairos_bench_allocs_per_op",
+          "legendFormat": "{{benchmark}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
