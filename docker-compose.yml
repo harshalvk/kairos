@@ -76,6 +76,12 @@ services:
       - "4318:4318" # otlp http receiver
     restart: unless-stopped
 
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: kairos-pushgateway
+    ports:
+      - "9091:9091"
+
 volumes:
   postgres-data:
   redis-data:

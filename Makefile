@@ -3,7 +3,7 @@ POSTGRES_DSN := postgres://kairos:kairos@localhost:5432/kairos?sslmode=disable
 SHELL := "C:\Windows\system32\bash.exe"
 .SHELLFLAGS := -ec
 
-.PHONY: help build test lint fmt vet migrate vuln sec run-worker run-producer run-scheduler run-deadletter docker-up docker-down docker-logs clean docker-build-worker docker-build-scheduler docker-build-producer docker-build-deadletter chaos
+.PHONY: help build test lint fmt vet migrate vuln sec run-worker run-producer run-scheduler run-deadletter docker-up docker-down docker-logs clean docker-build-worker docker-build-scheduler docker-build-producer docker-build-deadletter chaos bench-push
 
 build:
 	go build -o bin/producer.exe ./cmd/producer
@@ -107,3 +107,6 @@ migrate-status:
 
 chaos:
 	go test -v -timeout 5m ./chaos/...
+
+bench-push:
+	go run ./cmd/benchpush -gateway http://localhost:9091 -pkgs ./...
